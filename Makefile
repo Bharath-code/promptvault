@@ -35,7 +35,7 @@ run:
 
 ## Run tests
 test:
-	CGO_ENABLED=1 go test $(GO_TAGS) ./...
+	CGO_ENABLED=1 go test -tags "fts5" ./...
 
 ## Clean build artifacts
 clean:

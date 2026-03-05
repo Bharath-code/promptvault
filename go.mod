@@ -12,6 +12,7 @@ require (
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/spf13/cobra v1.8.1
+	golang.org/x/time v0.14.0
 )
 
 require (

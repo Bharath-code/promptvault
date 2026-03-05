@@ -2,12 +2,15 @@ package sync
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"time"
 
 	"github.com/Bharath-code/promptvault/internal/db"
 	"github.com/Bharath-code/promptvault/internal/export"
@@ -24,11 +27,45 @@ func configPath() string {
 	return filepath.Join(home, ".promptvault", "config.json")
 }
 
-func LoadConfig() Config {
+// gistIDRegex validates GitHub Gist ID format (alphanumeric only)
+var gistIDRegex = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
+
+// githubTokenRegex validates GitHub Personal Access Token format (classic: ghp_, fine-grained: github_pat_)
+var githubTokenRegex = regexp.MustCompile(`^(ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})$`)
+
+// validateGistID checks if the GistID is in valid format
+func validateGistID(id string) error {
+	if id == "" {
+		return fmt.Errorf("GistID cannot be empty")
+	}
+	if len(id) > 64 {
+		return fmt.Errorf("GistID too long (max 64 characters)")
+	}
+	if !gistIDRegex.MatchString(id) {
+		return fmt.Errorf("GistID contains invalid characters (must be alphanumeric)")
+	}
+	return nil
+}
+
+// validateGitHubToken checks if the GitHub token is in valid format
+func validateGitHubToken(token string) error {
+	if token == "" {
+		return fmt.Errorf("GitHub token cannot be empty")
+	}
+	if !githubTokenRegex.MatchString(token) {
+		return fmt.Errorf("invalid GitHub token format. Token must start with 'ghp_' (classic PAT) or 'github_pat_' (fine-grained PAT)")
+	}
+	return nil
+}
+
+// LoadConfig loads the configuration from file
+func LoadConfig() (Config, error) {
 	var c Config
 	data, err := os.ReadFile(configPath())
 	if err == nil {
-		json.Unmarshal(data, &c)
+		if err := json.Unmarshal(data, &c); err != nil {
+			return c, fmt.Errorf("parsing config file: %w", err)
+		}
 	}
 	// Env fallback
 	if token := os.Getenv("PROMPTVAULT_GITHUB_TOKEN"); token != "" {
@@ -37,21 +74,33 @@ func LoadConfig() Config {
 	if gist := os.Getenv("PROMPTVAULT_GIST_ID"); gist != "" {
 		c.GistID = gist
 	}
-	return c
+	return c, nil
 }
 
 func SaveConfig(c Config) error {
-	data, _ := json.MarshalIndent(c, "", "  ")
-	return os.WriteFile(configPath(), data, 0600)
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+	if err := os.WriteFile(configPath(), data, 0600); err != nil {
+		return fmt.Errorf("writing config file: %w", err)
+	}
+	return nil
 }
 
 // Push exports the database to JSON and uploads it to a private GitHub Gist
 func Push(d *db.DB, token string) (string, error) {
+	ctx := context.Background()
 	if token == "" {
 		return "", fmt.Errorf("GitHub token is required")
 	}
 
-	prompts, err := d.List("")
+	// Validate GitHub token format
+	if err := validateGitHubToken(token); err != nil {
+		return "", err
+	}
+
+	prompts, err := d.List(ctx, "")
 	if err != nil {
 		return "", err
 	}
@@ -62,7 +111,10 @@ func Push(d *db.DB, token string) (string, error) {
 		return "", err
 	}
 
-	cfg := LoadConfig()
+	cfg, err := LoadConfig()
+	if err != nil {
+		return "", fmt.Errorf("loading config: %w", err)
+	}
 	if token != "" {
 		cfg.GitHubToken = token
 	}
@@ -90,7 +142,7 @@ func Push(d *db.DB, token string) (string, error) {
 	req.Header.Set("Authorization", "token "+cfg.GitHubToken)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -116,7 +168,11 @@ func Push(d *db.DB, token string) (string, error) {
 
 // Pull downloads the JSON from the configured Gist and imports it
 func Pull(d *db.DB, token string) (int, error) {
-	cfg := LoadConfig()
+	ctx := context.Background()
+	cfg, err := LoadConfig()
+	if err != nil {
+		return 0, fmt.Errorf("loading config: %w", err)
+	}
 	if token != "" {
 		cfg.GitHubToken = token
 	}
@@ -125,12 +181,17 @@ func Pull(d *db.DB, token string) (int, error) {
 		return 0, fmt.Errorf("no Gist ID configured. Have you run 'sync push' yet or set PROMPTVAULT_GIST_ID?")
 	}
 
+	// Validate GistID format to prevent URL injection
+	if err := validateGistID(cfg.GistID); err != nil {
+		return 0, fmt.Errorf("invalid GistID: %w", err)
+	}
+
 	req, _ := http.NewRequest("GET", "https://api.github.com/gists/"+cfg.GistID, nil)
 	if cfg.GitHubToken != "" {
 		req.Header.Set("Authorization", "token "+cfg.GitHubToken)
 	}
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
@@ -163,11 +224,17 @@ func Pull(d *db.DB, token string) (int, error) {
 	added := 0
 	for _, p := range prompts {
 		// Only Add if it doesn't exist, or update if it does
-		existing, err := d.Get(p.ID)
+		existing, err := d.Get(ctx, p.ID)
 		if err == nil && existing != nil {
-			d.Update(p)
+			if err := d.Update(ctx, p); err != nil {
+				added++
+				continue
+			}
 		} else {
-			d.Add(p)
+			if err := d.Add(ctx, p); err != nil {
+				added++
+				continue
+			}
 		}
 		added++
 	}

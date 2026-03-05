@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/spf13/cobra"
@@ -12,11 +15,49 @@ import (
 	"github.com/Bharath-code/promptvault/internal/export"
 	"github.com/Bharath-code/promptvault/internal/mcp"
 	"github.com/Bharath-code/promptvault/internal/model"
-	"github.com/Bharath-code/promptvault/internal/sync"
+	gistsync "github.com/Bharath-code/promptvault/internal/sync"
 	"github.com/Bharath-code/promptvault/internal/tui"
 )
 
 var database *db.DB
+
+// Constants for clean code
+const (
+	stdinReadBuffer = 64 * 1024 // 64KB buffer for stdin reads
+)
+
+// spinner frames for loading indicator
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// showLoading displays a loading spinner with a message
+// Returns a done function that should be called when the operation is complete
+func showLoading(msg string) func() {
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		i := 0
+		for {
+			select {
+			case <-done:
+				// Clear the loading line completely
+				fmt.Printf("\r\033[2K\r")
+				return
+			default:
+				fmt.Printf("\r%s %s", spinnerFrames[i%len(spinnerFrames)], msg)
+				i++
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
+
+	return func() {
+		close(done)
+		wg.Wait()
+	}
+}
 
 // Root command
 var rootCmd = &cobra.Command{
@@ -38,6 +79,7 @@ var addCmd = &cobra.Command{
 	Short: "Add a new prompt",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		title, _ := cmd.Flags().GetString("title")
 		content, _ := cmd.Flags().GetString("content")
 		stack, _ := cmd.Flags().GetString("stack")
@@ -56,7 +98,7 @@ var addCmd = &cobra.Command{
 			// Try reading from stdin
 			stat, _ := os.Stdin.Stat()
 			if (stat.Mode() & os.ModeCharDevice) == 0 {
-				buf := make([]byte, 1024*64)
+				buf := make([]byte, stdinReadBuffer)
 				n, _ := os.Stdin.Read(buf)
 				content = string(buf[:n])
 			}
@@ -88,7 +130,7 @@ var addCmd = &cobra.Command{
 			Verified: verified,
 		}
 
-		if err := database.Add(p); err != nil {
+		if err := database.Add(ctx, p); err != nil {
 			return fmt.Errorf("adding prompt: %w", err)
 		}
 
@@ -103,10 +145,16 @@ var listCmd = &cobra.Command{
 	Short: "List prompts",
 	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		stack, _ := cmd.Flags().GetString("stack")
 		short, _ := cmd.Flags().GetBool("short")
 
-		prompts, err := database.List(stack)
+		// Show loading indicator
+		stopLoading := showLoading("Loading prompts...")
+
+		prompts, err := database.List(ctx, stack)
+		stopLoading()
+
 		if err != nil {
 			return err
 		}
@@ -144,12 +192,13 @@ var getCmd = &cobra.Command{
 	Short: "Get a prompt by ID or title (copies to clipboard)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		query := args[0]
 		copyFlag, _ := cmd.Flags().GetBool("copy")
 		printFlag, _ := cmd.Flags().GetBool("print")
 
 		// Try by ID first, then search
-		prompts, err := database.Search(query)
+		prompts, err := database.Search(ctx, query)
 		if err != nil || len(prompts) == 0 {
 			return fmt.Errorf("no prompt found matching: %s", query)
 		}
@@ -164,7 +213,9 @@ var getCmd = &cobra.Command{
 			if err := clipboard.WriteAll(p.Content); err != nil {
 				return fmt.Errorf("copying to clipboard: %w", err)
 			}
-			_ = database.IncrementUsage(p.ID)
+			if incErr := database.IncrementUsage(ctx, p.ID); incErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠ Warning: Failed to track usage: %v\n", incErr)
+			}
 			fmt.Fprintf(os.Stderr, "✓ Copied '%s' to clipboard\n", p.Title)
 		}
 
@@ -178,7 +229,13 @@ var searchCmd = &cobra.Command{
 	Short: "Full-text search across all prompts",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		prompts, err := database.Search(args[0])
+		ctx := context.Background()
+		// Show loading indicator
+		stopLoading := showLoading("Searching prompts...")
+
+		prompts, err := database.Search(ctx, args[0])
+		stopLoading()
+
 		if err != nil {
 			return err
 		}
@@ -207,13 +264,14 @@ var deleteCmd = &cobra.Command{
 	Aliases: []string{"rm"},
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		force, _ := cmd.Flags().GetBool("force")
 
 		// Search to find the prompt
-		prompts, err := database.Search(args[0])
+		prompts, err := database.Search(ctx, args[0])
 		if err != nil || len(prompts) == 0 {
 			// Try exact ID
-			if err := database.Delete(args[0]); err != nil {
+			if err := database.Delete(ctx, args[0]); err != nil {
 				return fmt.Errorf("prompt not found: %s", args[0])
 			}
 			fmt.Println("✓ Deleted")
@@ -232,7 +290,7 @@ var deleteCmd = &cobra.Command{
 			}
 		}
 
-		if err := database.Delete(p.ID); err != nil {
+		if err := database.Delete(ctx, p.ID); err != nil {
 			return err
 		}
 		fmt.Printf("✓ Deleted: %s\n", p.Title)
@@ -245,11 +303,17 @@ var exportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export prompts to various formats (skill.md, agents.md, cursorrules, etc.)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		format, _ := cmd.Flags().GetString("format")
 		stack, _ := cmd.Flags().GetString("stack")
 		output, _ := cmd.Flags().GetString("output")
 
-		prompts, err := database.List(stack)
+		// Show loading indicator
+		stopLoading := showLoading("Exporting prompts...")
+
+		prompts, err := database.List(ctx, stack)
+		stopLoading()
+
 		if err != nil {
 			return err
 		}
@@ -302,7 +366,8 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize vault with curated starter prompts",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		count, err := database.Count()
+		ctx := context.Background()
+		count, err := database.Count(ctx)
 		if err != nil {
 			return err
 		}
@@ -313,17 +378,22 @@ var initCmd = &cobra.Command{
 			return nil
 		}
 
+		// Show loading indicator
+		stopLoading := showLoading("Initializing vault with curated prompts...")
+
 		seeds := model.SeedPrompts()
 		added := 0
 		for _, p := range seeds {
-			if err := database.Add(p); err != nil {
-				fmt.Fprintf(os.Stderr, "⚠ Skipping '%s': %v\n", p.Title, err)
+			if err := database.Add(ctx, p); err != nil {
+				stopLoading()
+				fmt.Fprintf(os.Stderr, "\n⚠ Skipping '%s': %v\n", p.Title, err)
 				continue
 			}
 			added++
 		}
+		stopLoading()
 
-		fmt.Printf("⚡ Initialized PromptVault with %d curated prompts!\n", added)
+		fmt.Printf("\n⚡ Initialized PromptVault with %d curated prompts!\n", added)
 		fmt.Println("\nRun 'promptvault' to open the TUI, or 'promptvault list' to see them.")
 		return nil
 	},
@@ -335,6 +405,7 @@ var importCmd = &cobra.Command{
 	Short: "Import prompts from a JSON file",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		data, err := os.ReadFile(args[0])
 		if err != nil {
 			return fmt.Errorf("reading file: %w", err)
@@ -348,7 +419,7 @@ var importCmd = &cobra.Command{
 		added := 0
 		for _, p := range prompts {
 			p.ID = "" // Force new ID generation
-			if err := database.Add(p); err != nil {
+			if err := database.Add(ctx, p); err != nil {
 				fmt.Fprintf(os.Stderr, "⚠ Skipping '%s': %v\n", p.Title, err)
 				continue
 			}
@@ -365,7 +436,8 @@ var statsCmd = &cobra.Command{
 	Use:   "stats",
 	Short: "Show vault statistics",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		total, stacks, err := database.Stats()
+		ctx := context.Background()
+		total, stacks, err := database.Stats(ctx)
 		if err != nil {
 			return err
 		}
@@ -411,11 +483,17 @@ var syncPushCmd = &cobra.Command{
 	Short: "Backup all prompts to a private GitHub Gist",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		token, _ := cmd.Flags().GetString("token")
-		url, err := sync.Push(database, token)
+
+		// Show loading indicator
+		stopLoading := showLoading("Backing up prompts to GitHub Gist...")
+
+		url, err := gistsync.Push(database, token)
+		stopLoading()
+
 		if err != nil {
 			return err
 		}
-		fmt.Printf("✓ Successfully backed up prompts to %s\n", url)
+		fmt.Printf("\n✓ Successfully backed up prompts to %s\n", url)
 		return nil
 	},
 }
@@ -425,11 +503,17 @@ var syncPullCmd = &cobra.Command{
 	Short: "Restore prompts from your GitHub Gist backup",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		token, _ := cmd.Flags().GetString("token")
-		added, err := sync.Pull(database, token)
+
+		// Show loading indicator
+		stopLoading := showLoading("Restoring prompts from GitHub Gist...")
+
+		added, err := gistsync.Pull(database, token)
+		stopLoading()
+
 		if err != nil {
 			return err
 		}
-		fmt.Printf("✓ Successfully synced %d prompts from Gist\n", added)
+		fmt.Printf("\n✓ Successfully synced %d prompts from Gist\n", added)
 		return nil
 	},
 }

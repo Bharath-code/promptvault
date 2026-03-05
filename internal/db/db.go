@@ -1,12 +1,14 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,9 +16,16 @@ import (
 	"github.com/Bharath-code/promptvault/internal/model"
 )
 
+// Maximum content length for prompts (100KB)
+const maxContentLength = 100 * 1024
+
+// Maximum title length for prompts
+const maxTitleLength = 500
+
 type DB struct {
 	conn *sql.DB
 	path string
+	mu   sync.RWMutex // Protects concurrent access to the database
 }
 
 // Open opens (or creates) the SQLite database
@@ -36,10 +45,33 @@ func Open() (*DB, error) {
 
 // OpenPath opens (or creates) the SQLite database at the specified path
 func OpenPath(dbPath string) (*DB, error) {
-	conn, err := sql.Open("sqlite3", dbPath+"?_journal=WAL&_timeout=5000")
+	// Validate and clean the path to prevent path traversal
+	if dbPath == "" {
+		return nil, fmt.Errorf("database path cannot be empty")
+	}
+	
+	// Clean the path to resolve any .. or . components
+	dbPath = filepath.Clean(dbPath)
+	
+	// Ensure the path is absolute
+	if !filepath.IsAbs(dbPath) {
+		return nil, fmt.Errorf("database path must be absolute")
+	}
+	
+	// Ensure the path has .db extension for safety
+	if !strings.HasSuffix(dbPath, ".db") {
+		return nil, fmt.Errorf("database path must have .db extension")
+	}
+	
+	// Enable WAL mode, NORMAL sync (faster than FULL), and a large in-memory cache to speed up reads
+	dsn := dbPath + "?_journal_mode=WAL&_synchronous=NORMAL&_cache_size=100000&_busy_timeout=5000"
+	conn, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
 	}
+
+	// Crucial for sqlite to prevent "database is locked" and optimize concurrent FTS scanning
+	conn.SetMaxOpenConns(1)
 
 	d := &DB{conn: conn, path: dbPath}
 	if err := d.migrate(); err != nil {
@@ -55,6 +87,35 @@ func (d *DB) Close() error {
 
 func (d *DB) Path() string {
 	return d.path
+}
+
+// validatePrompt checks if the prompt has valid content
+func validatePrompt(p *model.Prompt) error {
+	if p == nil {
+		return fmt.Errorf("prompt cannot be nil")
+	}
+	
+	title := strings.TrimSpace(p.Title)
+	if title == "" {
+		return fmt.Errorf("title is required")
+	}
+	if len(title) > maxTitleLength {
+		return fmt.Errorf("title exceeds maximum length of %d characters", maxTitleLength)
+	}
+	
+	content := strings.TrimSpace(p.Content)
+	if content == "" {
+		return fmt.Errorf("content is required")
+	}
+	if len(content) > maxContentLength {
+		return fmt.Errorf("content exceeds maximum length of %d bytes", maxContentLength)
+	}
+	
+	if p.Stack != "" && len(p.Stack) > 200 {
+		return fmt.Errorf("stack path exceeds maximum length of 200 characters")
+	}
+	
+	return nil
 }
 
 // migrate creates all tables
@@ -105,7 +166,15 @@ func (d *DB) migrate() error {
 }
 
 // Add inserts a new prompt
-func (d *DB) Add(p *model.Prompt) error {
+func (d *DB) Add(ctx context.Context, p *model.Prompt) error {
+	// Validate prompt before inserting
+	if err := validatePrompt(p); err != nil {
+		return fmt.Errorf("invalid prompt: %w", err)
+	}
+	
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
 	if p.ID == "" {
 		p.ID = uuid.New().String()
 	}
@@ -116,7 +185,7 @@ func (d *DB) Add(p *model.Prompt) error {
 	tags, _ := json.Marshal(p.Tags)
 	models, _ := json.Marshal(p.Models)
 
-	_, err := d.conn.Exec(`
+	_, err := d.conn.ExecContext(ctx, `
 		INSERT INTO prompts (id, title, content, tags, stack, models, verified, usage_count, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
 		p.ID, p.Title, p.Content, string(tags), p.Stack, string(models),
@@ -126,40 +195,40 @@ func (d *DB) Add(p *model.Prompt) error {
 }
 
 // Get returns a prompt by ID
-func (d *DB) Get(id string) (*model.Prompt, error) {
-	row := d.conn.QueryRow(`SELECT * FROM prompts WHERE id = ?`, id)
+func (d *DB) Get(ctx context.Context, id string) (*model.Prompt, error) {
+	row := d.conn.QueryRowContext(ctx, `SELECT * FROM prompts WHERE id = ?`, id)
 	return scanPrompt(row)
 }
 
 // List returns all prompts, optionally filtered by stack prefix
-func (d *DB) List(stackFilter string) ([]*model.Prompt, error) {
+func (d *DB) List(ctx context.Context, stackFilter string) ([]*model.Prompt, error) {
 	var rows *sql.Rows
 	var err error
 
 	if stackFilter != "" {
-		rows, err = d.conn.Query(`
-			SELECT * FROM prompts 
+		rows, err = d.conn.QueryContext(ctx, `
+			SELECT * FROM prompts
 			WHERE stack = ? OR stack LIKE ?
 			ORDER BY updated_at DESC`,
 			stackFilter, stackFilter+"/%",
 		)
 	} else {
-		rows, err = d.conn.Query(`SELECT * FROM prompts ORDER BY updated_at DESC`)
+		rows, err = d.conn.QueryContext(ctx, `SELECT * FROM prompts ORDER BY updated_at DESC`)
 	}
 
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanPrompts(rows)
+	return scanPrompts(ctx, rows)
 }
 
 // Search does full-text search across title, content, tags, stack
-func (d *DB) Search(query string) ([]*model.Prompt, error) {
+func (d *DB) Search(ctx context.Context, query string) ([]*model.Prompt, error) {
 	// Clean query for FTS5
 	query = strings.ReplaceAll(query, `"`, `""`)
 
-	rows, err := d.conn.Query(`
+	rows, err := d.conn.QueryContext(ctx, `
 		SELECT p.* FROM prompts p
 		JOIN prompts_fts fts ON p.id = fts.id
 		WHERE prompts_fts MATCH ?
@@ -170,8 +239,8 @@ func (d *DB) Search(query string) ([]*model.Prompt, error) {
 	if err != nil {
 		// Fallback to LIKE search if FTS fails
 		like := "%" + query + "%"
-		rows, err = d.conn.Query(`
-			SELECT * FROM prompts 
+		rows, err = d.conn.QueryContext(ctx, `
+			SELECT * FROM prompts
 			WHERE title LIKE ? OR content LIKE ? OR stack LIKE ? OR tags LIKE ?
 			ORDER BY updated_at DESC LIMIT 50`,
 			like, like, like, like,
@@ -181,16 +250,24 @@ func (d *DB) Search(query string) ([]*model.Prompt, error) {
 		}
 	}
 	defer rows.Close()
-	return scanPrompts(rows)
+	return scanPrompts(ctx, rows)
 }
 
 // Update modifies an existing prompt
-func (d *DB) Update(p *model.Prompt) error {
+func (d *DB) Update(ctx context.Context, p *model.Prompt) error {
+	// Validate prompt before updating
+	if err := validatePrompt(p); err != nil {
+		return fmt.Errorf("invalid prompt: %w", err)
+	}
+	
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
 	p.UpdatedAt = time.Now().UTC()
 	tags, _ := json.Marshal(p.Tags)
 	models, _ := json.Marshal(p.Models)
 
-	res, err := d.conn.Exec(`
+	res, err := d.conn.ExecContext(ctx, `
 		UPDATE prompts SET
 			title = ?, content = ?, tags = ?, stack = ?,
 			models = ?, verified = ?, updated_at = ?
@@ -209,8 +286,11 @@ func (d *DB) Update(p *model.Prompt) error {
 }
 
 // Delete removes a prompt
-func (d *DB) Delete(id string) error {
-	res, err := d.conn.Exec(`DELETE FROM prompts WHERE id = ?`, id)
+func (d *DB) Delete(ctx context.Context, id string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
+	res, err := d.conn.ExecContext(ctx, `DELETE FROM prompts WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
@@ -222,9 +302,12 @@ func (d *DB) Delete(id string) error {
 }
 
 // IncrementUsage bumps the usage counter and last_used_at
-func (d *DB) IncrementUsage(id string) error {
+func (d *DB) IncrementUsage(ctx context.Context, id string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
 	now := time.Now().UTC()
-	_, err := d.conn.Exec(`
+	_, err := d.conn.ExecContext(ctx, `
 		UPDATE prompts SET usage_count = usage_count + 1, last_used_at = ? WHERE id = ?`,
 		now, id,
 	)
@@ -232,19 +315,19 @@ func (d *DB) IncrementUsage(id string) error {
 }
 
 // Stats returns aggregate statistics
-func (d *DB) Stats() (total int, stacks int, err error) {
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM prompts`).Scan(&total)
+func (d *DB) Stats(ctx context.Context) (total int, stacks int, err error) {
+	err = d.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM prompts`).Scan(&total)
 	if err != nil {
 		return
 	}
-	err = d.conn.QueryRow(`SELECT COUNT(DISTINCT stack) FROM prompts WHERE stack != ''`).Scan(&stacks)
+	err = d.conn.QueryRowContext(ctx, `SELECT COUNT(DISTINCT stack) FROM prompts WHERE stack != ''`).Scan(&stacks)
 	return
 }
 
 // Count returns just the total number of prompts
-func (d *DB) Count() (int, error) {
+func (d *DB) Count(ctx context.Context) (int, error) {
 	var count int
-	err := d.conn.QueryRow(`SELECT COUNT(*) FROM prompts`).Scan(&count)
+	err := d.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM prompts`).Scan(&count)
 	return count, err
 }
 
@@ -280,8 +363,12 @@ func scanPrompt(row *sql.Row) (*model.Prompt, error) {
 		return nil, err
 	}
 
-	_ = json.Unmarshal([]byte(tags), &p.Tags)
-	_ = json.Unmarshal([]byte(models), &p.Models)
+	if err := json.Unmarshal([]byte(tags), &p.Tags); err != nil {
+		return nil, fmt.Errorf("parsing tags: %w", err)
+	}
+	if err := json.Unmarshal([]byte(models), &p.Models); err != nil {
+		return nil, fmt.Errorf("parsing models: %w", err)
+	}
 	p.Verified = verified == 1
 	if lastUsed.Valid {
 		p.LastUsedAt = &lastUsed.Time
@@ -289,9 +376,16 @@ func scanPrompt(row *sql.Row) (*model.Prompt, error) {
 	return &p, nil
 }
 
-func scanPrompts(rows *sql.Rows) ([]*model.Prompt, error) {
+func scanPrompts(ctx context.Context, rows *sql.Rows) ([]*model.Prompt, error) {
 	var prompts []*model.Prompt
 	for rows.Next() {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		var p model.Prompt
 		var tags, models string
 		var lastUsed sql.NullTime
@@ -306,8 +400,12 @@ func scanPrompts(rows *sql.Rows) ([]*model.Prompt, error) {
 			return nil, err
 		}
 
-		_ = json.Unmarshal([]byte(tags), &p.Tags)
-		_ = json.Unmarshal([]byte(models), &p.Models)
+		if err := json.Unmarshal([]byte(tags), &p.Tags); err != nil {
+			return nil, fmt.Errorf("parsing tags: %w", err)
+		}
+		if err := json.Unmarshal([]byte(models), &p.Models); err != nil {
+			return nil, fmt.Errorf("parsing models: %w", err)
+		}
 		p.Verified = verified == 1
 		if lastUsed.Valid {
 			p.LastUsedAt = &lastUsed.Time

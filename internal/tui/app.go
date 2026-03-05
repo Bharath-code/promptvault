@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -66,10 +68,16 @@ type App struct {
 	// Flash message timer
 	flashMsg  string
 	flashTime time.Time
+
+	// Loading state
+	spinner  spinner.Model
+	loading  bool
 }
 
 type tickMsg time.Time
 type promptsLoadedMsg []*model.Prompt
+type startLoadingMsg struct{}
+type stopLoadingMsg struct{}
 
 // New creates a new App instance
 func New(database *db.DB) *App {
@@ -79,25 +87,31 @@ func New(database *db.DB) *App {
 
 	preview := viewport.New(0, 0)
 
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
 	return &App{
 		db:      database,
 		search:  search,
 		preview: preview,
+		spinner: s,
 	}
 }
 
 // Init implements tea.Model
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(
-		a.loadPrompts(),
 		tea.EnterAltScreen,
+		a.loadPrompts(),
 	)
 }
 
 // loadPrompts fetches prompts from the db
 func (a *App) loadPrompts() tea.Cmd {
 	return func() tea.Msg {
-		prompts, err := a.db.List(a.stackFilter)
+		ctx := context.Background()
+		prompts, err := a.db.List(ctx, a.stackFilter)
 		if err != nil {
 			return promptsLoadedMsg(nil)
 		}
@@ -105,9 +119,28 @@ func (a *App) loadPrompts() tea.Cmd {
 	}
 }
 
+// startLoading shows the loading spinner
+func (a *App) startLoading() tea.Cmd {
+	a.loading = true
+	return nil
+}
+
+// stopLoading hides the loading spinner
+func (a *App) stopLoading() tea.Cmd {
+	a.loading = false
+	return nil
+}
+
 // Update implements tea.Model
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// Update spinner when loading
+	if a.loading {
+		var cmd tea.Cmd
+		a.spinner, cmd = a.spinner.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 
 	switch msg := msg.(type) {
 
@@ -126,6 +159,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.prompts = msg
 		a.applyFilter()
 		a.updatePreview()
+		// Stop loading when prompts are loaded
+		if a.loading {
+			a.loading = false
+		}
+
+	case startLoadingMsg:
+		a.loading = true
+		return a, nil
+
+	case stopLoadingMsg:
+		a.loading = false
+		return a, nil
 
 	case tickMsg:
 		// Clear status after 2 seconds
@@ -235,9 +280,14 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			// Copy prompt directly to clipboard
 			if err := clipboard.WriteAll(p.Content); err == nil {
-				_ = a.db.IncrementUsage(p.ID)
-				a.flashMsg = "✓ Copied to clipboard!"
-				a.flashTime = time.Now()
+				ctx := context.Background()
+				if incErr := a.db.IncrementUsage(ctx, p.ID); incErr != nil {
+					// Log but don't fail on usage increment error
+					a.setStatus("Copied (usage tracking failed)", true)
+				} else {
+					a.flashMsg = "✓ Copied to clipboard!"
+					a.flashTime = time.Now()
+				}
 				return a, tick()
 			} else {
 				a.setStatus("Failed to copy: "+err.Error(), true)
@@ -271,11 +321,13 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.updatePreview()
 
 	case "r":
+		a.loading = true
 		return a, a.loadPrompts()
 
 	case "esc":
 		a.state = stateList
 		a.stackFilter = ""
+		a.loading = true
 		return a, a.loadPrompts()
 	}
 
@@ -303,9 +355,11 @@ func (a *App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	a.search, cmd = a.search.Update(msg)
+	a.loading = true
 	a.applyFilter()
 	a.cursor = 0
 	a.updatePreview()
+	a.loading = false
 	return a, cmd
 }
 
@@ -318,25 +372,28 @@ func (a *App) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	result, cmd := a.form.Update(msg)
 	if result.Submitted {
+		ctx := context.Background()
 		p := result.Prompt
 		var err error
 		if a.state == stateAdd {
-			err = a.db.Add(p)
+			err = a.db.Add(ctx, p)
 			if err == nil {
 				a.setStatus("✓ Prompt added!", false)
 			}
 		} else {
-			err = a.db.Update(p)
+			err = a.db.Update(ctx, p)
 			if err == nil {
 				a.setStatus("✓ Prompt updated!", false)
 			}
 		}
 		if err != nil {
 			a.setStatus("Error: "+err.Error(), true)
+			a.loading = true
 			return a, tea.Batch(cmd, a.loadPrompts(), tick())
 		}
 		a.state = stateList
 		a.form = nil
+		a.loading = true
 		return a, tea.Batch(cmd, a.loadPrompts(), tick())
 	}
 
@@ -353,12 +410,20 @@ func (a *App) handleVarFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	res, cmd := a.varForm.Update(msg)
 	if res.Submitted {
+		ctx := context.Background()
 		if err := clipboard.WriteAll(res.Content); err == nil {
 			if p := a.selectedPrompt(); p != nil {
-				_ = a.db.IncrementUsage(p.ID)
+				if incErr := a.db.IncrementUsage(ctx, p.ID); incErr != nil {
+					// Log but don't fail on usage increment error
+					a.setStatus("Copied (usage tracking failed)", true)
+				} else {
+					a.flashMsg = "✓ Filled & Copied to clipboard!"
+					a.flashTime = time.Now()
+				}
+			} else {
+				a.flashMsg = "✓ Filled & Copied to clipboard!"
+				a.flashTime = time.Now()
 			}
-			a.flashMsg = "✓ Filled & Copied to clipboard!"
-			a.flashTime = time.Now()
 			a.state = stateList
 			a.varForm = nil
 			return a, tea.Batch(cmd, tick())
@@ -376,13 +441,15 @@ func (a *App) handleVarFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a *App) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
+		ctx := context.Background()
 		if p := a.selectedPrompt(); p != nil {
-			if err := a.db.Delete(p.ID); err == nil {
+			if err := a.db.Delete(ctx, p.ID); err == nil {
 				a.setStatus("Prompt deleted", false)
 				if a.cursor > 0 {
 					a.cursor--
 				}
 				a.state = stateList
+				a.loading = true
 				return a, tea.Batch(a.loadPrompts(), tick())
 			}
 		}
@@ -399,6 +466,11 @@ func (a *App) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a *App) View() string {
 	if a.width == 0 {
 		return "Loading..."
+	}
+
+	// Show loading overlay
+	if a.loading {
+		return a.renderLoading()
 	}
 
 	switch a.state {
@@ -706,6 +778,27 @@ func (a *App) renderDeleteConfirm() string {
 		Render(msg)
 }
 
+func (a *App) renderLoading() string {
+	// Show loading overlay with spinner
+	spinnerView := a.spinner.View() + " Loading prompts..."
+	
+	msg := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPrimary).
+		Padding(2, 4).
+		Render(lipgloss.JoinVertical(lipgloss.Center,
+			spinnerView,
+			"",
+			helpStyle.Render("Please wait..."),
+		))
+
+	return lipgloss.NewStyle().
+		Width(a.width).
+		Height(a.height).
+		Align(lipgloss.Center, lipgloss.Center).
+		Render(msg)
+}
+
 // --- helpers ---
 
 func (a *App) selectedPrompt() *model.Prompt {
@@ -723,7 +816,8 @@ func (a *App) applyFilter() {
 	}
 
 	var results []*model.Prompt
-	prompts, err := a.db.Search(q)
+	ctx := context.Background()
+	prompts, err := a.db.Search(ctx, q)
 	if err == nil {
 		results = prompts
 	}
