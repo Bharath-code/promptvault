@@ -33,6 +33,18 @@ PromptVault fixes this. It's a CLI + TUI that keeps every prompt you've ever wri
 - **📦 Single binary** — No runtime, no Node, no Docker. Just download and run.
 - **🚀 One-command init** — Start with 15+ curated, production-grade prompts
 
+### 🎯 New DX Features (v1.1+)
+
+- **💡 Smart Error Messages** — Actionable suggestions when commands fail
+- **🐚 Shell Completion** — Auto-completion for bash, zsh, fish, and PowerShell
+- **📄 JSON Output** — Scriptable output with `--json` flag for automation
+- **🔍 Verbose/Debug Mode** — Detailed logging with `-v` and `-vd` flags
+- **⚡ Command Aliases** — Quick commands like `ls`, `rm`, `find`, `exp`
+- **🎨 Rich Colors** — Beautiful color-coded output throughout the CLI
+- **🎯 Smart Defaults** — Auto-detects project type (React, Go, Python, Terraform)
+- **👁️ Preview Mode** — Preview prompts before adding with `--preview`
+- **🏷️ Git Integration** — Auto-tags prompts with current Git branch
+
 ---
 
 ## Install
@@ -66,20 +78,33 @@ promptvault add "Fix React useEffect deps" \
   --models "claude-sonnet,gpt-4o" \
   --tags "debugging,hooks"
 
+# Add with preview (see before committing)
+promptvault add "My Prompt" --content "Prompt content..." --preview
+
 # Add a prompt from stdin
 cat my-prompt.txt | promptvault add "My prompt" --stack backend/python
+
+# Smart defaults: Auto-detects stack from current directory
+cd my-react-project
+promptvault add "React Hook" --content "useEffect example..."
+# → Auto-detects stack: frontend/react
 
 # Search and copy to clipboard
 promptvault get "useEffect"
 
 # List all prompts
 promptvault list
+promptvault ls              # alias
+
+# List as JSON for scripting
+promptvault list --json | jq '.[] | .title'
 
 # List by stack
 promptvault list --stack frontend/react
 
 # Full-text search
 promptvault search "typescript generics"
+promptvault find "react"    # alias
 
 # Export to Claude Code SKILL.md
 promptvault export --format skill.md --output SKILL.md
@@ -92,6 +117,7 @@ promptvault export --format agents.md > AGENTS.md
 
 # Import prompts from JSON
 promptvault import shared-prompts.json
+promptvault imp prompts.json  # alias
 
 # Start an MCP Server over stdio
 promptvault mcp
@@ -102,8 +128,17 @@ promptvault sync push --token <gh_token>
 # Restore prompts from GitHub Gist
 promptvault sync pull
 
-# Show stats
+# Show stats with beautiful formatting
 promptvault stats
+promptvault statistics        # alias
+
+# Debug mode for troubleshooting
+promptvault list -v           # verbose
+promptvault list -vd          # verbose + debug with timestamps
+
+# Generate shell completion
+promptvault completion bash > ~/.bash_completion
+source ~/.bash_completion
 ```
 
 ---
@@ -123,6 +158,37 @@ promptvault stats
 | `r` | Refresh |
 | `Esc` | Clear filter / go back |
 | `q` | Quit |
+
+---
+
+## CLI Commands & Aliases
+
+### Core Commands
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `list` | `ls`, `show`, `list-all` | List all prompts |
+| `search` | `find`, `query` | Full-text search |
+| `delete` | `rm`, `remove`, `del` | Delete a prompt |
+| `get` | `fetch` | Get and copy to clipboard |
+| `export` | `exp` | Export to various formats |
+| `import` | `imp` | Import from JSON |
+| `stats` | `statistics` | Show vault statistics |
+
+### Global Flags
+| Flag | Description |
+|------|-------------|
+| `-v, --verbose` | Enable verbose output |
+| `-d, --debug` | Enable debug output with timestamps |
+| `-h, --help` | Show help for command |
+
+### Command-Specific Flags
+| Command | Flag | Description |
+|---------|------|-------------|
+| `list`, `search` | `--json` | Output as JSON for scripting |
+| `add` | `--preview` | Preview before adding |
+| `export` | `--format` | Export format (skill.md, cursorrules, etc.) |
+| `export` | `--stack` | Filter by stack |
+| `completion` | — | Generate shell completion scripts |
 
 ---
 

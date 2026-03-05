@@ -369,6 +369,85 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 .cta-subtitle { color: var(--text-muted); margin-bottom: 2rem; }
 .cta-section .hero-actions { justify-content: center; display: flex; }
 
+/* DX Features Section */
+.dx-features {
+    padding: 6rem 2rem;
+    background: linear-gradient(to bottom, transparent, rgba(139, 92, 246, 0.03));
+    border-top: 1px solid var(--border-color);
+}
+.dx-features .section-header {
+    text-align: center;
+    margin-bottom: 4rem;
+}
+.dx-features h2 {
+    font-family: var(--font-heading);
+    font-size: clamp(2rem, 4vw, 2.5rem);
+    letter-spacing: -0.03em;
+    margin-bottom: 1rem;
+}
+.dx-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.dx-item {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 1.5rem;
+    transition: var(--transition-smooth);
+}
+.dx-item:hover {
+    background: var(--bg-surface-hover);
+    border-color: rgba(139, 92, 246, 0.3);
+    transform: translateY(-4px);
+}
+.dx-code {
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+}
+.dx-code code {
+    color: var(--accent-primary);
+    display: block;
+    margin-bottom: 0.75rem;
+}
+.dx-output {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    padding: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.8;
+}
+.dx-output .error { color: #ef4444; }
+.dx-output .success { color: #10b981; }
+.dx-output .info { color: #0ea5e9; }
+.dx-output .debug { color: #64748b; }
+.dx-output .number { color: #8b5cf6; }
+.dx-output .tips {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.dx-output .tip {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+.dx-desc {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+.dx-desc strong {
+    color: var(--text-main);
+}
+
 /* Footer */
 .footer {
     border-top: 1px solid var(--border-color);

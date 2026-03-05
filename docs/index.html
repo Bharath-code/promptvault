@@ -45,7 +45,7 @@
         <header class="hero">
             <div class="hero-content">
                 <div class="badge-wrapper gs-reveal">
-                    <span class="badge">v1.0.0 is live</span>
+                    <span class="badge">v1.1 - Major DX Update</span>
                 </div>
                 <h1 class="hero-title gs-reveal">
                     The Universal Prompt OS <br>
@@ -162,11 +162,47 @@
                     <p>Exports automatically identify and append to files like <code>.cursorrules</code> seamlessly in
                         your workspace.</p>
                 </div>
+                
+                <!-- New DX Features -->
                 <div class="bento-card gs-fade-up">
-                    <div class="bento-icon">🛡️</div>
-                    <h3>OSS CI/CD & Linting</h3>
-                    <p>Mature codebase maintained via continuous <code>golangci-lint</code>, comprehensive tests, and
-                        automated maintenance.</p>
+                    <div class="bento-icon">💡</div>
+                    <h3>Smart Error Messages</h3>
+                    <p>Actionable suggestions when commands fail. Never guess what went wrong again.</p>
+                </div>
+                <div class="bento-card gs-fade-up">
+                    <div class="bento-icon">🐚</div>
+                    <h3>Shell Completion</h3>
+                    <p>Auto-completion for bash, zsh, fish, and PowerShell. Tab-complete all commands and flags.</p>
+                </div>
+                <div class="bento-card gs-fade-up">
+                    <div class="bento-icon">📄</div>
+                    <h3>JSON Output</h3>
+                    <p>Scriptable output with <code>--json</code> flag. Pipe to <code>jq</code> for powerful automation.</p>
+                </div>
+                <div class="bento-card gs-fade-up">
+                    <div class="bento-icon">🔍</div>
+                    <h3>Verbose/Debug Mode</h3>
+                    <p>Detailed logging with <code>-v</code> and <code>-vd</code> flags. See exactly what's happening.</p>
+                </div>
+                <div class="bento-card gs-fade-up">
+                    <div class="bento-icon">⚡</div>
+                    <h3>Command Aliases</h3>
+                    <p>Quick commands like <code>ls</code>, <code>rm</code>, <code>find</code>, <code>exp</code>. Muscle memory from other CLIs works.</p>
+                </div>
+                <div class="bento-card gs-fade-up">
+                    <div class="bento-icon">🎯</div>
+                    <h3>Smart Defaults</h3>
+                    <p>Auto-detects project type (React, Go, Python, Terraform) and sets the right stack automatically.</p>
+                </div>
+                <div class="bento-card gs-fade-up">
+                    <div class="bento-icon">👁️</div>
+                    <h3>Preview Mode</h3>
+                    <p>Preview prompts in a beautiful box before adding with <code>--preview</code> flag.</p>
+                </div>
+                <div class="bento-card gs-fade-up">
+                    <div class="bento-icon">🏷️</div>
+                    <h3>Git Integration</h3>
+                    <p>Auto-tags prompts with current Git branch. Track which branch created each prompt.</p>
                 </div>
             </div>
         </section>
@@ -179,6 +215,62 @@
                 <div class="install-box">
                     <span class="prompt-symbol">$</span>
                     <code class="install-cmd">promptvault init</code>
+                </div>
+            </div>
+        </section>
+
+        <!-- New DX Features Showcase -->
+        <section class="dx-features gs-fade-up">
+            <div class="section-header">
+                <h2>New in v1.1: Enhanced Developer Experience</h2>
+                <p>Powerful new features to make your workflow even faster.</p>
+            </div>
+
+            <div class="dx-grid">
+                <div class="dx-item">
+                    <div class="dx-code">
+                        <code>promptvault add</code>
+                        <div class="dx-output">
+                            <span class="error">✗ Title is required</span>
+                            <div class="tips">
+                                <span class="tip">💡 Pass title as argument: promptvault add "My prompt"</span>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="dx-desc"><strong>Smart Errors:</strong> Actionable suggestions when commands fail.</p>
+                </div>
+
+                <div class="dx-item">
+                    <div class="dx-code">
+                        <code>promptvault list --json | jq '.length'</code>
+                        <div class="dx-output">
+                            <span class="number">15</span>
+                        </div>
+                    </div>
+                    <p class="dx-desc"><strong>JSON Output:</strong> Scriptable output for automation with jq.</p>
+                </div>
+
+                <div class="dx-item">
+                    <div class="dx-code">
+                        <code>promptvault ls -vd</code>
+                        <div class="dx-output">
+                            <span class="debug">🔍 [14:30:45.123] Executing list command</span><br>
+                            <span class="debug">🔍 [14:30:45.145] Query took 22ms</span><br>
+                            <span class="success">✓ 15 prompt(s)</span>
+                        </div>
+                    </div>
+                    <p class="dx-desc"><strong>Debug Mode:</strong> See exactly what's happening with -vd flag.</p>
+                </div>
+
+                <div class="dx-item">
+                    <div class="dx-code">
+                        <code>cd my-react-project && promptvault add "Hook"</code>
+                        <div class="dx-output">
+                            <span class="success">✓ Added prompt: Hook</span><br>
+                            <span class="info">ℹ  Stack: frontend/react (auto-detected)</span>
+                        </div>
+                    </div>
+                    <p class="dx-desc"><strong>Smart Defaults:</strong> Auto-detects React, Go, Python, Terraform projects.</p>
                 </div>
             </div>
         </section>
