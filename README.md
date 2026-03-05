@@ -4,7 +4,7 @@
 
 [![Downloads](https://img.shields.io/github/downloads/Bharath-code/promptvault/total?style=flat-square&color=7C3AED)](https://github.com/Bharath-code/promptvault/releases)
 [![Release](https://img.shields.io/github/v/release/Bharath-code/promptvault?style=flat-square)](https://github.com/Bharath-code/promptvault/releases)
-[![Go Version](https://img.shields.io/badge/go-1.20+-blue?style=flat-square)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/go-1.23+-blue?style=flat-square)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 ---
@@ -24,6 +24,12 @@ PromptVault fixes this. It's a CLI + TUI that keeps every prompt you've ever wri
 - **🤖 Model tagging** — Mark prompts as verified for Claude, GPT-4o, Gemini, and more
 - **💻 Beautiful TUI** — Built with Bubble Tea, works in any terminal
 - **🗄 SQLite + FTS** — Zero-dependency local storage with full-text search
+- **🔌 MCP Server** — Connect directly to Claude Desktop, Cursor, and Windsurf via Model Context Protocol
+- **☁️ Cloud Sync** — Backup and sync your vault across machines using private GitHub Gists
+- **✨ Markdown Previews** — Beautifully rendered markdown and syntax highlighting inside the terminal
+- **✏️ Interactive Variables** — Define `{{variables}}` in prompts; the TUI prompts you to fill them before copying
+- **🪄 Smart Auto-Injection** — Automatically append exported rules to files like `.cursorrules` and `SKILL.md` directly in your workspace
+- **🛡️ OSS CI/CD & Linting** — Mature codebase maintained with `golangci-lint`, comprehensive workflows, and Dependabot
 - **📦 Single binary** — No runtime, no Node, no Docker. Just download and run.
 - **🚀 One-command init** — Start with 15+ curated, production-grade prompts
 
@@ -87,6 +93,15 @@ promptvault export --format agents.md > AGENTS.md
 # Import prompts from JSON
 promptvault import shared-prompts.json
 
+# Start an MCP Server over stdio
+promptvault mcp
+
+# Backup prompts to a private GitHub Gist
+promptvault sync push --token <gh_token>
+
+# Restore prompts from GitHub Gist
+promptvault sync pull
+
 # Show stats
 promptvault stats
 ```
@@ -98,7 +113,8 @@ promptvault stats
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` or `k` / `j` | Navigate prompts |
-| `Enter` or `Space` | Copy to clipboard |
+| `Enter` | Fill variables (if any) and copy to clipboard |
+| `Space` | Copy to clipboard (raw) |
 | `/` | Search |
 | `a` | Add new prompt |
 | `e` | Edit selected |
@@ -165,12 +181,12 @@ Export your entire prompt library — or a stack subset — to any AI tool forma
 
 ## Roadmap
 
-- [ ] Cloud sync (end-to-end encrypted)
+- [x] Cloud sync (via private GitHub Gists)
 - [ ] Team workspaces
 - [ ] Prompt marketplace
-- [ ] MCP server mode (use your vault in Cursor/Windsurf automatically)
+- [x] MCP server mode (use your vault in Cursor/Windsurf automatically)
 - [ ] Browser extension (save prompts from Claude.ai, ChatGPT)
-- [ ] Prompt templates with `{{variable}}` support
+- [x] Prompt templates with `{{variable}}` support
 - [ ] Decay detection (prompts that may no longer work with newer models)
 
 Star the repo to stay updated ⭐

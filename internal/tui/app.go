@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/Bharath-code/promptvault/internal/db"
 	"github.com/Bharath-code/promptvault/internal/model"
@@ -25,6 +26,7 @@ const (
 	stateEdit
 	stateDeleteConfirm
 	stateCopied
+	stateFillVars
 )
 
 // App is the root Bubble Tea model
@@ -41,11 +43,17 @@ type App struct {
 	cursor   int
 
 	// Sub-components
-	search   textinput.Model
-	preview  viewport.Model
+	search        textinput.Model
+	preview       viewport.Model
+	cachedPreview string
+
+	// Renderer cache
+	glamourRenderer *glamour.TermRenderer
+	lastWrapWidth   int
 
 	// Add/Edit form
 	form     *Form
+	varForm  *VarForm
 
 	// Feedback
 	statusMsg   string
@@ -108,6 +116,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.preview.Width = a.previewWidth()
 		a.preview.Height = a.contentHeight()
+		// Calculate safe width for search box avoiding overflow: 20 is min, cap it to 40 max or percentage
+		sw := a.width/3
+		if sw < 20 { sw = 20 }
+		a.search.Width = sw
+		a.updatePreview()
 
 	case promptsLoadedMsg:
 		a.prompts = msg
@@ -118,24 +131,36 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clear status after 2 seconds
 		if !a.statusTimer.IsZero() && time.Since(a.statusTimer) > 2*time.Second {
 			a.statusMsg = ""
+			a.statusTimer = time.Time{}
 		}
 		if !a.flashTime.IsZero() && time.Since(a.flashTime) > 1500*time.Millisecond {
 			a.flashMsg = ""
+			a.flashTime = time.Time{}
 		}
-		return a, tick()
+		if !a.statusTimer.IsZero() || !a.flashTime.IsZero() {
+			cmds = append(cmds, tick())
+		}
+		return a, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
-		return a.handleKey(msg)
+		if msg.Type == tea.KeyCtrlC {
+			return a, tea.Quit
+		}
+		var cmd tea.Cmd
+		_, cmd = a.handleKey(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	// Update sub-components
 	if a.state == stateSearch {
-		var cmd tea.Cmd
-		a.search, cmd = a.search.Update(msg)
-		cmds = append(cmds, cmd)
-		a.applyFilter()
-		a.cursor = 0
-		a.updatePreview()
+		// Only update search with non-key messages here, key messages are handled in handleSearchKey
+		if _, ok := msg.(tea.KeyMsg); !ok {
+			var cmd tea.Cmd
+			a.search, cmd = a.search.Update(msg)
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	if a.state == stateDetail {
@@ -159,6 +184,9 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case stateAdd, stateEdit:
 		return a.handleFormKey(msg)
 
+	case stateFillVars:
+		return a.handleVarFormKey(msg)
+
 	case stateDeleteConfirm:
 		return a.handleDeleteKey(msg)
 	}
@@ -173,12 +201,18 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 
 	case "up", "k":
+		if a.state == stateDetail {
+			break // Let viewport handle it
+		}
 		if a.cursor > 0 {
 			a.cursor--
 			a.updatePreview()
 		}
 
 	case "down", "j":
+		if a.state == stateDetail {
+			break // Let viewport handle it
+		}
 		if a.cursor < len(a.filtered)-1 {
 			a.cursor++
 			a.updatePreview()
@@ -190,14 +224,24 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, textinput.Blink
 
 	case "enter", " ":
-		// Copy prompt to clipboard
+		// Check for variables and fill if present
 		if p := a.selectedPrompt(); p != nil {
+			vars := ExtractVars(p.Content)
+			if len(vars) > 0 {
+				a.state = stateFillVars
+				a.varForm = NewVarForm(p.Content, vars)
+				return a, a.varForm.Init()
+			}
+
+			// Copy prompt directly to clipboard
 			if err := clipboard.WriteAll(p.Content); err == nil {
 				_ = a.db.IncrementUsage(p.ID)
 				a.flashMsg = "✓ Copied to clipboard!"
 				a.flashTime = time.Now()
+				return a, tick()
 			} else {
 				a.setStatus("Failed to copy: "+err.Error(), true)
+				return a, tick()
 			}
 		}
 
@@ -224,6 +268,7 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			a.state = stateList
 		}
+		a.updatePreview()
 
 	case "r":
 		return a, a.loadPrompts()
@@ -234,7 +279,7 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, a.loadPrompts()
 	}
 
-	return a, tick()
+	return a, nil
 }
 
 func (a *App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -251,17 +296,9 @@ func (a *App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.search.Blur()
 		return a, nil
 
-	case "up":
-		if a.cursor > 0 {
-			a.cursor--
-			a.updatePreview()
-		}
-
-	case "down":
-		if a.cursor < len(a.filtered)-1 {
-			a.cursor++
-			a.updatePreview()
-		}
+	case "up", "down":
+		// These shouldn't act as input but rather navigation
+		return a.handleListKey(msg)
 	}
 
 	var cmd tea.Cmd
@@ -269,7 +306,7 @@ func (a *App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	a.applyFilter()
 	a.cursor = 0
 	a.updatePreview()
-	return a, tea.Batch(cmd, tick())
+	return a, cmd
 }
 
 func (a *App) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -296,13 +333,43 @@ func (a *App) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if err != nil {
 			a.setStatus("Error: "+err.Error(), true)
+			return a, tea.Batch(cmd, a.loadPrompts(), tick())
 		}
 		a.state = stateList
 		a.form = nil
-		return a, tea.Batch(cmd, a.loadPrompts())
+		return a, tea.Batch(cmd, a.loadPrompts(), tick())
 	}
 
 	a.form = result.Form
+	return a, cmd
+}
+
+func (a *App) handleVarFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" {
+		a.state = stateList
+		a.varForm = nil
+		return a, nil
+	}
+
+	res, cmd := a.varForm.Update(msg)
+	if res.Submitted {
+		if err := clipboard.WriteAll(res.Content); err == nil {
+			if p := a.selectedPrompt(); p != nil {
+				_ = a.db.IncrementUsage(p.ID)
+			}
+			a.flashMsg = "✓ Filled & Copied to clipboard!"
+			a.flashTime = time.Now()
+			a.state = stateList
+			a.varForm = nil
+			return a, tea.Batch(cmd, tick())
+		} else {
+			a.setStatus("Failed to copy: "+err.Error(), true)
+			a.state = stateList
+			a.varForm = nil
+			return a, tea.Batch(cmd, tick())
+		}
+	}
+	a.varForm = res.Form
 	return a, cmd
 }
 
@@ -315,6 +382,8 @@ func (a *App) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if a.cursor > 0 {
 					a.cursor--
 				}
+				a.state = stateList
+				return a, tea.Batch(a.loadPrompts(), tick())
 			}
 		}
 		a.state = stateList
@@ -339,6 +408,10 @@ func (a *App) View() string {
 		}
 	case stateDeleteConfirm:
 		return a.renderDeleteConfirm()
+	case stateFillVars:
+		if a.varForm != nil {
+			return a.varForm.View(a.width, a.height)
+		}
 	}
 
 	return a.renderMain()
@@ -373,6 +446,27 @@ func (a *App) renderHeader() string {
 	}
 
 	left := lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", count)
+	
+	// Ensure searchBox doesn't push layout offscreen. Give priority to searchBox.
+	actualLeftWidth := lipgloss.Width(left)
+	actualSearchWidth := lipgloss.Width(searchBox)
+	
+	// If the terminal is incredibly narrow, hide the left side completely
+	if actualLeftWidth + actualSearchWidth + 4 > a.width {
+		left = title
+		actualLeftWidth = lipgloss.Width(left)
+		if actualLeftWidth + actualSearchWidth + 4 > a.width {
+			left = "" // hide title to make room for search box
+			actualLeftWidth = 0
+		}
+	}
+	
+	gapW := a.width - actualLeftWidth - actualSearchWidth - 4
+	if gapW < 0 {
+		gapW = 0
+	}
+	gap := lipgloss.NewStyle().Width(gapW).Render("")
+
 	header := lipgloss.NewStyle().
 		Width(a.width).
 		BorderBottom(true).
@@ -381,7 +475,7 @@ func (a *App) renderHeader() string {
 		Padding(0, 1).
 		Render(lipgloss.JoinHorizontal(lipgloss.Center,
 			left,
-			lipgloss.NewStyle().Width(a.width-lipgloss.Width(left)-lipgloss.Width(searchBox)-4).Render(""),
+			gap,
 			searchBox,
 		))
 
@@ -503,12 +597,6 @@ func (a *App) renderPreviewPane(width, height int) string {
 		meta += tagStyle.Render(m) + " "
 	}
 
-	// Content preview (truncated)
-	content := p.Content
-	if len(content) > 400 {
-		content = content[:400] + "\n..."
-	}
-
 	contentStyle := lipgloss.NewStyle().
 		Foreground(colorText).
 		Width(width - 4).
@@ -524,7 +612,7 @@ func (a *App) renderPreviewPane(width, height int) string {
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		meta,
-		contentStyle.Render(content),
+		contentStyle.Render(a.cachedPreview),
 		tags,
 		footer,
 	)
@@ -539,31 +627,6 @@ func (a *App) renderPreview(width, height int) string {
 	}
 
 	header := panelHeaderStyle.Width(width-4).Render("▶ " + p.Title)
-
-	meta := ""
-	if p.Stack != "" {
-		meta += stackStyle.Render(p.Stack) + "  "
-	}
-	if p.Verified {
-		meta += verifiedStyle.Render("✓ Verified") + "  "
-	}
-	for _, m := range p.Models {
-		meta += tagStyle.Render(m) + " "
-	}
-
-	contentStyle := lipgloss.NewStyle().
-		Foreground(colorText).
-		Width(width - 6)
-
-	a.preview.SetContent(
-		lipgloss.JoinVertical(lipgloss.Left,
-			meta,
-			"",
-			contentStyle.Render(p.Content),
-			"",
-			usageStyle.Render(fmt.Sprintf("Used %d times", p.UsageCount)),
-		),
-	)
 
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -670,9 +733,77 @@ func (a *App) applyFilter() {
 func (a *App) updatePreview() {
 	p := a.selectedPrompt()
 	if p == nil {
+		a.cachedPreview = ""
+		a.preview.SetContent("")
 		return
 	}
-	a.preview.SetContent(p.Content)
+	
+	w := a.preview.Width - 4
+	if w < 20 {
+		w = 80
+	}
+	
+	if a.glamourRenderer == nil || a.lastWrapWidth != w {
+		renderer, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(w),
+		)
+		if err == nil {
+			a.glamourRenderer = renderer
+			a.lastWrapWidth = w
+		}
+	}
+	
+	// Fast path for preview pane items during list scrolling
+	lines := strings.Split(p.Content, "\n")
+	paneText := p.Content
+	if len(lines) > 20 {
+		paneText = strings.Join(lines[:20], "\n") + "\n\n..."
+	}
+
+	if a.glamourRenderer != nil {
+		if str, err := a.glamourRenderer.Render(paneText); err == nil {
+			paneText = str
+		}
+	}
+	a.cachedPreview = paneText
+
+	// Only full-render when we specifically expand to detail view
+	fullRenderedContent := p.Content
+	if a.state == stateDetail {
+		// Glamour's regex engine is extremely CPU intensive. Avoid rendering if >2500 bytes (blocks for seconds)
+		if a.glamourRenderer != nil && len(p.Content) < 2500 {
+			if str, err := a.glamourRenderer.Render(p.Content); err == nil {
+				fullRenderedContent = str
+			}
+		}
+	}
+
+	// Create the full text for viewport
+	meta := ""
+	if p.Stack != "" {
+		meta += stackStyle.Render(p.Stack) + "  "
+	}
+	if p.Verified {
+		meta += verifiedStyle.Render("✓ Verified") + "  "
+	}
+	for _, m := range p.Models {
+		meta += tagStyle.Render(m) + " "
+	}
+
+	fullContent := lipgloss.JoinVertical(lipgloss.Left,
+		meta,
+		"",
+		fullRenderedContent,
+		"",
+		usageStyle.Render(fmt.Sprintf("Used %d times", p.UsageCount)),
+	)
+	
+	a.preview.SetContent(fullContent)
+	// Optionally clear scroll state to top when changing prompt
+	if a.preview.YOffset > 0 {
+		a.preview.GotoTop()
+	}
 }
 
 func (a *App) setStatus(msg string, isErr bool) {

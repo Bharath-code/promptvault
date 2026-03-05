@@ -10,7 +10,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/Bharath-code/promptvault/internal/db"
 	"github.com/Bharath-code/promptvault/internal/export"
+	"github.com/Bharath-code/promptvault/internal/mcp"
 	"github.com/Bharath-code/promptvault/internal/model"
+	"github.com/Bharath-code/promptvault/internal/sync"
 	"github.com/Bharath-code/promptvault/internal/tui"
 )
 
@@ -262,8 +264,28 @@ var exportCmd = &cobra.Command{
 			return err
 		}
 
+		if output == "" {
+			switch format {
+			case "cursorrules":
+				output = ".cursorrules"
+			case "windsurf":
+				output = ".windsurfrules"
+			case "skill.md":
+				output = "SKILL.md"
+			case "agents.md":
+				output = "AGENTS.md"
+			}
+		}
+
 		if output != "" {
-			if err := os.WriteFile(output, []byte(result), 0644); err != nil {
+			// Try to append if file exists, else create
+			f, err := os.OpenFile(output, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return fmt.Errorf("opening file: %w", err)
+			}
+			defer f.Close()
+
+			if _, err := f.WriteString("\n" + result + "\n"); err != nil {
 				return fmt.Errorf("writing file: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "✓ Exported %d prompts to %s\n", len(prompts), output)
@@ -360,11 +382,54 @@ var stacksCmd = &cobra.Command{
 	Use:   "stacks",
 	Short: "List all tech stack taxonomies",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Available stack paths:\n")
+		fmt.Println("Available stack paths:")
 		for _, s := range model.DefaultStacks {
 			fmt.Printf("  %s\n", s)
 		}
 		fmt.Println("\nUse: promptvault add --stack frontend/react/hooks ...")
+		return nil
+	},
+}
+
+// mcp command
+var mcpCmd = &cobra.Command{
+	Use:   "mcp",
+	Short: "Run the MCP Server over stdio for AI integration",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return mcp.Serve(database)
+	},
+}
+
+// sync command
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync prompts to/from a private GitHub Gist",
+}
+
+var syncPushCmd = &cobra.Command{
+	Use:   "push",
+	Short: "Backup all prompts to a private GitHub Gist",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		token, _ := cmd.Flags().GetString("token")
+		url, err := sync.Push(database, token)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("✓ Successfully backed up prompts to %s\n", url)
+		return nil
+	},
+}
+
+var syncPullCmd = &cobra.Command{
+	Use:   "pull",
+	Short: "Restore prompts from your GitHub Gist backup",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		token, _ := cmd.Flags().GetString("token")
+		added, err := sync.Pull(database, token)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("✓ Successfully synced %d prompts from Gist\n", added)
 		return nil
 	},
 }
@@ -403,6 +468,11 @@ func init() {
 	// init flags
 	initCmd.Flags().Bool("force", false, "Add seed prompts even if vault is not empty")
 
+	// sync flags
+	syncPushCmd.Flags().String("token", "", "GitHub Personal Access Token (or set PROMPTVAULT_GITHUB_TOKEN)")
+	syncPullCmd.Flags().String("token", "", "GitHub Personal Access Token (or set PROMPTVAULT_GITHUB_TOKEN)")
+	syncCmd.AddCommand(syncPushCmd, syncPullCmd)
+
 	// Register all commands
 	rootCmd.AddCommand(
 		addCmd,
@@ -415,5 +485,7 @@ func init() {
 		importCmd,
 		statsCmd,
 		stacksCmd,
+		mcpCmd,
+		syncCmd,
 	)
 }

@@ -31,6 +31,11 @@ func Open() (*DB, error) {
 	}
 
 	dbPath := filepath.Join(dir, "vault.db")
+	return OpenPath(dbPath)
+}
+
+// OpenPath opens (or creates) the SQLite database at the specified path
+func OpenPath(dbPath string) (*DB, error) {
 	conn, err := sql.Open("sqlite3", dbPath+"?_journal=WAL&_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)

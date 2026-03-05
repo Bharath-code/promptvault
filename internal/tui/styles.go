@@ -28,10 +28,9 @@ var subtitleStyle = lipgloss.NewStyle().
 
 // ── Search ────────────────────────────────────────────────────
 var searchStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(colorAccent).
-	Padding(0, 1).
-	Width(30)
+	Background(colorBgHover).
+	Foreground(colorText).
+	Padding(0, 1)
 
 // ── Help / Keybindings ────────────────────────────────────────
 var helpStyle = lipgloss.NewStyle().
