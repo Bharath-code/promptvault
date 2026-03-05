@@ -2,7 +2,9 @@
 
 > The universal prompt OS for developers — store, search, and deploy AI prompts by tech stack, right from your terminal.
 
-[![Go Version](https://img.shields.io/badge/go-1.22+-blue?style=flat-square)](https://go.dev)
+[![Downloads](https://img.shields.io/github/downloads/Bharath-code/promptvault/total?style=flat-square&color=7C3AED)](https://github.com/Bharath-code/promptvault/releases)
+[![Release](https://img.shields.io/github/v/release/Bharath-code/promptvault?style=flat-square)](https://github.com/Bharath-code/promptvault/releases)
+[![Go Version](https://img.shields.io/badge/go-1.20+-blue?style=flat-square)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 ---

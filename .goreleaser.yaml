@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: promptvault
+    main: .
+    binary: promptvault
+    env:
+      - CGO_ENABLED=1
+    tags:
+      - sqlite_fts5
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    # CGO cross-compilation requires special setup per OS
+    # For now, build natively on macOS; use CI matrix for Linux
+    ignore:
+      - goos: linux
+        goarch: arm64
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+
+release:
+  github:
+    owner: Bharath-code
+    name: promptvault
+  prerelease: auto
+  name_template: "v{{.Version}}"
+  header: |
+    ## ⚡ PromptVault v{{.Version}}
+
+    The universal prompt OS for developers.
+
+    ### Install
+
+    ```sh
+    # macOS / Linux
+    brew install Bharath-code/tap/promptvault
+
+    # Or download binary below ↓
+    ```
+  footer: |
+    **Full Changelog**: https://github.com/Bharath-code/promptvault/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+brews:
+  - repository:
+      owner: Bharath-code
+      name: homebrew-tap
+    homepage: "https://github.com/Bharath-code/promptvault"
+    description: "The universal prompt OS for developers — store, search, and deploy AI prompts by tech stack"
+    license: "MIT"
+    install: |
+      bin.install "promptvault"
+    test: |
+      system "#{bin}/promptvault", "stats"
