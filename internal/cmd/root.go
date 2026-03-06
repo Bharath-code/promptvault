@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -958,6 +960,151 @@ To load completions automatically on every shell startup:
 	},
 }
 
+// DX: Watch mode for auto-export
+var watchCmd = &cobra.Command{
+	Use:   "watch",
+	Short: "Watch for changes and auto-export prompts",
+	Long: `Watch the database for changes and automatically export prompts.
+
+This is useful for keeping your exported files (SKILL.md, .cursorrules, etc.) 
+automatically up-to-date as you add, edit, or delete prompts.
+
+Examples:
+  # Watch and auto-update SKILL.md
+  promptvault watch --format skill.md --output SKILL.md
+
+  # Watch with custom interval
+  promptvault watch --format cursorrules --output .cursorrules --interval 2s
+
+  # Watch specific stack
+  promptvault watch --format skill.md --output SKILL.md --stack frontend/react
+
+Press Ctrl+C to stop watching.
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		format, _ := cmd.Flags().GetString("format")
+		stack, _ := cmd.Flags().GetString("stack")
+		output, _ := cmd.Flags().GetString("output")
+		interval, _ := cmd.Flags().GetDuration("interval")
+
+		if format == "" || output == "" {
+			printError("--format and --output are required")
+			fmt.Fprint(os.Stderr, suggestFix(fmt.Errorf("no prompts to export")))
+			return fmt.Errorf("--format and --output are required")
+		}
+
+		// Get initial state
+		lastMod, err := getDatabaseModTime(database.Path())
+		if err != nil {
+			printError("Failed to stat database: %v", err)
+			return err
+		}
+
+		// Do initial export
+		printInfo("Performing initial export...")
+		if err := doExport(ctx, database, format, stack, output); err != nil {
+			printError("Initial export failed: %v", err)
+			return err
+		}
+
+		printSuccess("Watching for changes... (interval: %v)", interval)
+		printInfo("Export format: %s → %s", format, output)
+		if stack != "" {
+			printInfo("Filtering by stack: %s", stack)
+		}
+		printInfo("Press Ctrl+C to stop")
+		fmt.Println()
+
+		// Set up signal handling for graceful shutdown
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		exportCount := 0
+
+		for {
+			select {
+			case <-sigChan:
+				fmt.Println()
+				printInfo("Shutting down watch mode...")
+				printSuccess("Exported %d times during this session", exportCount)
+				return nil
+
+			case <-ticker.C:
+				currentMod, err := getDatabaseModTime(database.Path())
+				if err != nil {
+					logDebug("Failed to stat database: %v", err)
+					continue
+				}
+
+				if currentMod.After(lastMod) {
+					lastMod = currentMod
+					exportCount++
+
+					logInfo("Detected change (#%d), exporting...", exportCount)
+
+					if err := doExport(ctx, database, format, stack, output); err != nil {
+						printError("Export failed: %v", err)
+						logDebug("Export error: %v", err)
+					} else {
+						printSuccess("Exported %s", output)
+					}
+				} else {
+					logDebug("No changes detected (last mod: %v)", lastMod.Format(time.RFC3339))
+				}
+			}
+		}
+	},
+}
+
+func init() {
+	// DX: Watch command flags
+	watchCmd.Flags().StringP("format", "f", "skill.md", "Export format")
+	watchCmd.Flags().StringP("output", "o", "", "Output file (required)")
+	watchCmd.Flags().StringP("stack", "s", "", "Filter by stack")
+	watchCmd.Flags().Duration("interval", 5*time.Second, "Check interval")
+	watchCmd.MarkFlagRequired("output")
+}
+
+// getDatabaseModTime returns the last modification time of the database file
+func getDatabaseModTime(dbPath string) (time.Time, error) {
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
+}
+
+// doExport performs a single export operation
+func doExport(ctx context.Context, db *db.DB, format, stack, output string) error {
+	prompts, err := db.List(ctx, stack)
+	if err != nil {
+		return fmt.Errorf("listing prompts: %w", err)
+	}
+
+	if len(prompts) == 0 {
+		logDebug("No prompts to export")
+		return nil
+	}
+
+	e := export.New(prompts)
+	result, err := e.Export(export.Format(format))
+	if err != nil {
+		return fmt.Errorf("exporting: %w", err)
+	}
+
+	// Write to file (overwrite, not append)
+	if err := os.WriteFile(output, []byte(result+"\n"), 0644); err != nil {
+		return fmt.Errorf("writing file: %w", err)
+	}
+
+	logDebug("Exported %d prompts to %s", len(prompts), output)
+	return nil
+}
+
 // mcp command
 var mcpCmd = &cobra.Command{
 	Use:   "mcp",
@@ -1061,5 +1208,6 @@ func init() {
 		mcpCmd,
 		syncCmd,
 		completionCmd, // DX: Shell completion
+		watchCmd,      // DX: Watch mode
 	)
 }

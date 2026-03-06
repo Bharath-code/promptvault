@@ -128,6 +128,10 @@ promptvault sync push --token <gh_token>
 # Restore prompts from GitHub Gist
 promptvault sync pull
 
+# Watch for changes and auto-export (NEW!)
+promptvault watch --format skill.md --output SKILL.md
+promptvault watch --format cursorrules --output .cursorrules --interval 2s
+
 # Show stats with beautiful formatting
 promptvault stats
 promptvault statistics        # alias
@@ -173,6 +177,7 @@ source ~/.bash_completion
 | `export` | `exp` | Export to various formats |
 | `import` | `imp` | Import from JSON |
 | `stats` | `statistics` | Show vault statistics |
+| `watch` | — | **NEW!** Auto-export on changes |
 
 ### Global Flags
 | Flag | Description |
