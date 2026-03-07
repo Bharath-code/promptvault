@@ -8,7 +8,7 @@
 
 ## ✅ Completed Features
 
-### 1. Fuzzy Search with Scoring
+### 1. Fuzzy Search with Scoring ✅
 
 **File:** `internal/tui/fuzzy.go`
 
@@ -39,6 +39,58 @@
 - `internal/tui/fuzzy.go` (new - 199 lines)
 - `internal/tui/app.go` (updated applyFilter)
 - `internal/tui/styles.go` (added scoreStyle)
+
+---
+
+### 2. Quick Action Menu (? Key) ✅
+
+**File:** `internal/tui/app.go`
+
+**Features:**
+- ✅ Press `?` to show help/quick actions
+- ✅ Organized by sections (Navigation, Actions, Quick Actions, Other)
+- ✅ Clean, centered overlay design
+- ✅ Any key closes menu
+- ✅ Status bar hint updated
+
+**Usage:**
+```
+# In TUI, press ? to show help
+# Press any key to close
+```
+
+**Key Bindings Shown:**
+
+**Navigation:**
+- `↑/↓` or `k/j` - Navigate prompts
+- `/` - Search prompts
+- `Enter` - Copy to clipboard
+- `Space` - Copy (raw)
+
+**Actions:**
+- `a` - Add new prompt
+- `e` - Edit selected
+- `d` - Delete selected
+- `v` - Toggle preview
+
+**Quick Actions:**
+- `c` - Copy selected
+- `r` - Refresh list
+- `s` - Show stats (planned)
+
+**Other:**
+- `?` - This help menu
+- `Esc` - Go back / Clear search
+- `q` - Quit
+- `Ctrl+C` - Exit
+
+**Files Modified:**
+- `internal/tui/app.go` (~150 lines added)
+  - New `stateHelpMenu` state
+  - New `renderHelpMenu()` function
+  - Updated `handleKey()` to show/hide menu
+  - Updated `View()` to render menu
+  - Updated status bar hint
 
 ---
 

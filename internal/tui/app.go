@@ -30,6 +30,7 @@ const (
 	stateDeleteConfirm
 	stateCopied
 	stateFillVars
+	stateHelpMenu // Quick action menu
 )
 
 // App is the root Bubble Tea model
@@ -220,6 +221,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// If in help menu, any key closes it except special keys
+	if a.state == stateHelpMenu {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return a, tea.Quit
+		default:
+			a.state = stateList
+			return a, nil
+		}
+	}
+
 	switch a.state {
 
 	case stateList, stateDetail:
@@ -325,6 +337,15 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		a.loading = true
 		return a, a.loadPrompts()
+
+	case "?":
+		// Toggle help menu
+		if a.state == stateHelpMenu {
+			a.state = stateList
+		} else {
+			a.state = stateHelpMenu
+		}
+		return a, nil
 
 	case "esc":
 		a.state = stateList
@@ -491,6 +512,8 @@ func (a *App) View() string {
 		if a.varForm != nil {
 			return a.varForm.View(a.width, a.height)
 		}
+	case stateHelpMenu:
+		return a.renderHelpMenu()
 	}
 
 	return a.renderMain()
@@ -740,7 +763,7 @@ func (a *App) renderStatusBar() string {
 		left = statusBarStyle.Render("PromptVault")
 	}
 
-	keys := statusBarMutedStyle.Render("a add  •  e edit  •  d del  •  / search  •  v preview  •  q quit")
+	keys := statusBarMutedStyle.Render("a add  •  e edit  •  d del  •  / search  •  ? help  •  q quit")
 
 	gap := lipgloss.NewStyle().
 		Background(colorBgAlt).
@@ -789,6 +812,83 @@ func (a *App) renderDeleteConfirm() string {
 			lipgloss.NewStyle().Foreground(colorText).Render(p.Title),
 			"",
 			helpStyle.Render("y confirm  •  n / ESC cancel"),
+		))
+
+	return lipgloss.NewStyle().
+		Width(a.width).
+		Height(a.height).
+		Align(lipgloss.Center, lipgloss.Center).
+		Render(msg)
+}
+
+func (a *App) renderHelpMenu() string {
+	helpItems := []struct {
+		key   string
+		desc  string
+		section string
+	}{
+		// Navigation
+		{"↑/↓ or k/j", "Navigate prompts", "Navigation"},
+		{"/", "Search prompts", ""},
+		{"Enter", "Copy to clipboard", ""},
+		{"Space", "Copy (raw)", ""},
+		
+		// Actions
+		{"a", "Add new prompt", "Actions"},
+		{"e", "Edit selected", ""},
+		{"d", "Delete selected", ""},
+		{"v", "Toggle preview", ""},
+		
+		// Quick Actions
+		{"c", "Copy selected", "Quick Actions"},
+		{"r", "Refresh list", ""},
+		{"s", "Show stats", ""},
+		
+		// Other
+		{"?", "This help menu", "Other"},
+		{"Esc", "Go back / Clear search", ""},
+		{"q", "Quit", ""},
+		{"Ctrl+C", "Exit", ""},
+	}
+
+	var sections []string
+	currentSection := ""
+	var items []string
+
+	for _, item := range helpItems {
+		if item.section != "" && item.section != currentSection {
+			if len(items) > 0 {
+				sections = append(sections, strings.Join(items, "\n"))
+				items = nil
+			}
+			currentSection = item.section
+			items = append(items, panelHeaderStyle.Render(" "+currentSection))
+		}
+		items = append(items, fmt.Sprintf("  %-16s %s", 
+			tagStyle.Render(item.key), 
+			item.desc))
+	}
+
+	if len(items) > 0 {
+		sections = append(sections, strings.Join(items, "\n"))
+	}
+
+	content := strings.Join(sections, "\n\n")
+
+	msg := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPrimary).
+		Padding(2, 4).
+		Width(60).
+		Render(lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorPrimary).
+				PaddingBottom(1).
+				Render("⚡ Quick Actions & Keybindings"),
+			content,
+			"",
+			helpStyle.Render("Press any key to close"),
 		))
 
 	return lipgloss.NewStyle().
