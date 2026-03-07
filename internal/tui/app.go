@@ -44,6 +44,7 @@ type App struct {
 	prompts  []*model.Prompt
 	filtered []*model.Prompt
 	cursor   int
+	scores   []int // Fuzzy search scores
 
 	// Sub-components
 	search        textinput.Model
@@ -639,12 +640,25 @@ func (a *App) renderListItem(p *model.Prompt, selected bool, width int) string {
 	}
 
 	title := p.Title + verified + usage
+	
+	// Show match score if searching
+	score := ""
+	if a.scores != nil && len(a.scores) > 0 {
+		for i, fp := range a.filtered {
+			if fp == p && i < len(a.scores) && a.scores[i] < 100 {
+				score = scoreStyle.Render(fmt.Sprintf(" %d%%", a.scores[i]))
+				break
+			}
+		}
+	}
+
 	meta := stack
 
 	line := lipgloss.JoinHorizontal(lipgloss.Center,
 		title,
-		lipgloss.NewStyle().Width(width-lipgloss.Width(title)-lipgloss.Width(meta)-4).Render(""),
+		lipgloss.NewStyle().Width(width-lipgloss.Width(title)-lipgloss.Width(meta)-lipgloss.Width(score)-4).Render(""),
 		meta,
+		score,
 	)
 
 	if selected {
@@ -818,16 +832,14 @@ func (a *App) applyFilter() {
 	q := strings.TrimSpace(a.search.Value())
 	if q == "" {
 		a.filtered = a.prompts
+		a.scores = nil
 		return
 	}
 
-	var results []*model.Prompt
-	ctx := context.Background()
-	prompts, err := a.db.Search(ctx, q)
-	if err == nil {
-		results = prompts
-	}
-	a.filtered = results
+	// Use fuzzy search for better results
+	filtered, scores := FuzzySearch(q, a.prompts)
+	a.filtered = filtered
+	a.scores = scores
 }
 
 func (a *App) updatePreview() {

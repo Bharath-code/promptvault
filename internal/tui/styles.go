@@ -56,6 +56,10 @@ var usageStyle = lipgloss.NewStyle().
 	Foreground(colorMuted).
 	Italic(true)
 
+var scoreStyle = lipgloss.NewStyle().
+	Foreground(colorAccent).
+	Bold(true)
+
 // ── List Items ────────────────────────────────────────────────
 var selectedItemStyle = lipgloss.NewStyle().
 	Background(colorBgHover).
