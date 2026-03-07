@@ -135,8 +135,43 @@ func (d *DB) migrate() error {
 		last_used_at DATETIME
 	);
 
+	CREATE TABLE IF NOT EXISTS test_results (
+		id              TEXT PRIMARY KEY,
+		prompt_id       TEXT NOT NULL,
+		model           TEXT NOT NULL,
+		input           TEXT NOT NULL,
+		expected_output TEXT NOT NULL,
+		actual_output   TEXT NOT NULL,
+		passed          INTEGER NOT NULL,
+		score           REAL NOT NULL,
+		latency_ms      INTEGER NOT NULL,
+		token_usage     INTEGER NOT NULL,
+		error_message   TEXT,
+		created_at      DATETIME NOT NULL,
+		FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS prompt_versions (
+		id          TEXT PRIMARY KEY,
+		prompt_id   TEXT NOT NULL,
+		version     INTEGER NOT NULL,
+		title       TEXT NOT NULL,
+		content     TEXT NOT NULL,
+		tags        TEXT NOT NULL,
+		stack       TEXT NOT NULL,
+		models      TEXT NOT NULL,
+		verified    INTEGER NOT NULL,
+		commit_msg  TEXT,
+		author      TEXT,
+		created_at  DATETIME NOT NULL,
+		FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_prompts_stack ON prompts(stack);
 	CREATE INDEX IF NOT EXISTS idx_prompts_updated ON prompts(updated_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_test_results_prompt ON test_results(prompt_id);
+	CREATE INDEX IF NOT EXISTS idx_versions_prompt ON prompt_versions(prompt_id);
+	CREATE INDEX IF NOT EXISTS idx_versions_version ON prompt_versions(prompt_id, version);
 	CREATE VIRTUAL TABLE IF NOT EXISTS prompts_fts USING fts5(
 		id UNINDEXED,
 		title,
@@ -254,7 +289,7 @@ func (d *DB) Search(ctx context.Context, query string) ([]*model.Prompt, error) 
 }
 
 // Update modifies an existing prompt
-func (d *DB) Update(ctx context.Context, p *model.Prompt) error {
+func (d *DB) Update(ctx context.Context, p *model.Prompt, commitMsg, author string) error {
 	// Validate prompt before updating
 	if err := validatePrompt(p); err != nil {
 		return fmt.Errorf("invalid prompt: %w", err)
@@ -262,6 +297,12 @@ func (d *DB) Update(ctx context.Context, p *model.Prompt) error {
 	
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	
+	// Create version snapshot before updating
+	if err := d.createVersionInternal(ctx, p, commitMsg, author); err != nil {
+		// Don't fail the update if versioning fails
+		// logDebug("Failed to create version snapshot: %v", err)
+	}
 	
 	p.UpdatedAt = time.Now().UTC()
 	tags, _ := json.Marshal(p.Tags)
@@ -283,6 +324,31 @@ func (d *DB) Update(ctx context.Context, p *model.Prompt) error {
 		return fmt.Errorf("prompt not found: %s", p.ID)
 	}
 	return nil
+}
+
+// createVersionInternal creates a version snapshot (internal, no lock)
+func (d *DB) createVersionInternal(ctx context.Context, prompt *model.Prompt, commitMsg, author string) error {
+	// Get current max version
+	var maxVersion int
+	err := d.conn.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(version), 0) FROM prompt_versions WHERE prompt_id = ?`,
+		prompt.ID,
+	).Scan(&maxVersion)
+	if err != nil {
+		return err
+	}
+	
+	tags, _ := json.Marshal(prompt.Tags)
+	models, _ := json.Marshal(prompt.Models)
+	
+	_, err = d.conn.ExecContext(ctx, `
+		INSERT INTO prompt_versions (id, prompt_id, version, title, content, tags, stack, models, verified, commit_msg, author, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		uuid.New().String(), prompt.ID, maxVersion+1, prompt.Title, prompt.Content,
+		string(tags), prompt.Stack, string(models), boolToInt(prompt.Verified),
+		commitMsg, author, time.Now().UTC(),
+	)
+	return err
 }
 
 // Delete removes a prompt
@@ -329,6 +395,151 @@ func (d *DB) Count(ctx context.Context) (int, error) {
 	var count int
 	err := d.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM prompts`).Scan(&count)
 	return count, err
+}
+
+// SaveTestResult saves a test result for a prompt
+func (d *DB) SaveTestResult(ctx context.Context, result *model.TestResult) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
+	_, err := d.conn.ExecContext(ctx, `
+		INSERT INTO test_results (id, prompt_id, model, input, expected_output, actual_output, passed, score, latency_ms, token_usage, error_message, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		result.ID, result.PromptID, result.Model, result.Input, result.ExpectedOutput,
+		result.ActualOutput, boolToInt(result.Passed), result.Score, result.LatencyMs,
+		result.TokenUsage, result.ErrorMessage, result.CreatedAt,
+	)
+	return err
+}
+
+// GetTestResults returns all test results for a prompt
+func (d *DB) GetTestResults(ctx context.Context, promptID string) ([]*model.TestResult, error) {
+	rows, err := d.conn.QueryContext(ctx, `
+		SELECT * FROM test_results
+		WHERE prompt_id = ?
+		ORDER BY created_at DESC`,
+		promptID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTestResults(rows)
+}
+
+// GetPromptTestSuite returns aggregated test suite for a prompt
+func (d *DB) GetPromptTestSuite(ctx context.Context, promptID string) (*model.TestSuite, error) {
+	results, err := d.GetTestResults(ctx, promptID)
+	if err != nil {
+		return nil, err
+	}
+	
+	if len(results) == 0 {
+		return &model.TestSuite{
+			PromptID: promptID,
+			Tests:    []model.TestResult{},
+		}, nil
+	}
+	
+	passed := 0
+	totalScore := 0.0
+	testResults := make([]model.TestResult, len(results))
+	
+	for i, r := range results {
+		testResults[i] = *r
+		if r.Passed {
+			passed++
+		}
+		totalScore += r.Score
+	}
+	
+	return &model.TestSuite{
+		PromptID: promptID,
+		Tests:    testResults,
+		PassRate: float64(passed) / float64(len(results)) * 100,
+		AvgScore: totalScore / float64(len(results)),
+	}, nil
+}
+
+// DeleteTestResults deletes all test results for a prompt
+func (d *DB) DeleteTestResults(ctx context.Context, promptID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
+	_, err := d.conn.ExecContext(ctx, `DELETE FROM test_results WHERE prompt_id = ?`, promptID)
+	return err
+}
+
+// CreateVersion creates a new version snapshot of a prompt
+func (d *DB) CreateVersion(ctx context.Context, prompt *model.Prompt, commitMsg, author string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
+	// Get current max version
+	var maxVersion int
+	err := d.conn.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(version), 0) FROM prompt_versions WHERE prompt_id = ?`,
+		prompt.ID,
+	).Scan(&maxVersion)
+	if err != nil {
+		return err
+	}
+	
+	tags, _ := json.Marshal(prompt.Tags)
+	models, _ := json.Marshal(prompt.Models)
+	
+	_, err = d.conn.ExecContext(ctx, `
+		INSERT INTO prompt_versions (id, prompt_id, version, title, content, tags, stack, models, verified, commit_msg, author, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		uuid.New().String(), prompt.ID, maxVersion+1, prompt.Title, prompt.Content,
+		string(tags), prompt.Stack, string(models), boolToInt(prompt.Verified),
+		commitMsg, author, time.Now().UTC(),
+	)
+	return err
+}
+
+// GetPromptHistory returns all versions of a prompt
+func (d *DB) GetPromptHistory(ctx context.Context, promptID string) ([]*model.PromptVersion, error) {
+	rows, err := d.conn.QueryContext(ctx, `
+		SELECT * FROM prompt_versions
+		WHERE prompt_id = ?
+		ORDER BY version DESC`,
+		promptID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPromptVersions(rows)
+}
+
+// GetPromptVersion returns a specific version of a prompt
+func (d *DB) GetPromptVersion(ctx context.Context, promptID string, version int) (*model.PromptVersion, error) {
+	row := d.conn.QueryRowContext(ctx, `
+		SELECT * FROM prompt_versions
+		WHERE prompt_id = ? AND version = ?`,
+		promptID, version,
+	)
+	return scanPromptVersion(row)
+}
+
+// GetCurrentVersion returns the latest version number for a prompt
+func (d *DB) GetCurrentVersion(ctx context.Context, promptID string) (int, error) {
+	var version int
+	err := d.conn.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(version), 0) FROM prompt_versions WHERE prompt_id = ?`,
+		promptID,
+	).Scan(&version)
+	return version, err
+}
+
+// DeletePromptVersions deletes all versions for a prompt
+func (d *DB) DeletePromptVersions(ctx context.Context, promptID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
+	_, err := d.conn.ExecContext(ctx, `DELETE FROM prompt_versions WHERE prompt_id = ?`, promptID)
+	return err
 }
 
 // --- helpers ---
@@ -413,4 +624,93 @@ func scanPrompts(ctx context.Context, rows *sql.Rows) ([]*model.Prompt, error) {
 		prompts = append(prompts, &p)
 	}
 	return prompts, rows.Err()
+}
+
+func scanTestResults(rows *sql.Rows) ([]*model.TestResult, error) {
+	var results []*model.TestResult
+	for rows.Next() {
+		var r model.TestResult
+		var passed int
+		var errorMessage sql.NullString
+
+		err := rows.Scan(
+			&r.ID, &r.PromptID, &r.Model, &r.Input, &r.ExpectedOutput,
+			&r.ActualOutput, &passed, &r.Score, &r.LatencyMs,
+			&r.TokenUsage, &errorMessage, &r.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		r.Passed = passed == 1
+		if errorMessage.Valid {
+			r.ErrorMessage = errorMessage.String
+		}
+		results = append(results, &r)
+	}
+	return results, rows.Err()
+}
+
+func scanPromptVersion(row *sql.Row) (*model.PromptVersion, error) {
+	var v model.PromptVersion
+	var tags, models string
+	var verified int
+	var commitMsg, author sql.NullString
+
+	err := row.Scan(
+		&v.ID, &v.PromptID, &v.Version, &v.Title, &v.Content,
+		&tags, &v.Stack, &models, &verified, &commitMsg, &author, &v.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal([]byte(tags), &v.Tags); err != nil {
+		return nil, fmt.Errorf("parsing tags: %w", err)
+	}
+	if err := json.Unmarshal([]byte(models), &v.Models); err != nil {
+		return nil, fmt.Errorf("parsing models: %w", err)
+	}
+	v.Verified = verified == 1
+	if commitMsg.Valid {
+		v.CommitMsg = commitMsg.String
+	}
+	if author.Valid {
+		v.Author = author.String
+	}
+	return &v, nil
+}
+
+func scanPromptVersions(rows *sql.Rows) ([]*model.PromptVersion, error) {
+	var versions []*model.PromptVersion
+	for rows.Next() {
+		var v model.PromptVersion
+		var tags, models string
+		var verified int
+		var commitMsg, author sql.NullString
+
+		err := rows.Scan(
+			&v.ID, &v.PromptID, &v.Version, &v.Title, &v.Content,
+			&tags, &v.Stack, &models, &verified, &commitMsg, &author, &v.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := json.Unmarshal([]byte(tags), &v.Tags); err != nil {
+			return nil, fmt.Errorf("parsing tags: %w", err)
+		}
+		if err := json.Unmarshal([]byte(models), &v.Models); err != nil {
+			return nil, fmt.Errorf("parsing models: %w", err)
+		}
+		v.Verified = verified == 1
+		if commitMsg.Valid {
+			v.CommitMsg = commitMsg.String
+		}
+		if author.Valid {
+			v.Author = author.String
+		}
+		versions = append(versions, &v)
+	}
+	return versions, rows.Err()
 }

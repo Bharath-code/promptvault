@@ -226,7 +226,7 @@ func Pull(d *db.DB, token string) (int, error) {
 		// Only Add if it doesn't exist, or update if it does
 		existing, err := d.Get(ctx, p.ID)
 		if err == nil && existing != nil {
-			if err := d.Update(ctx, p); err != nil {
+			if err := d.Update(ctx, p, "Sync from Gist", ""); err != nil {
 				added++
 				continue
 			}

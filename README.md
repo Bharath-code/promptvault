@@ -45,6 +45,14 @@ PromptVault fixes this. It's a CLI + TUI that keeps every prompt you've ever wri
 - **👁️ Preview Mode** — Preview prompts before adding with `--preview`
 - **🏷️ Git Integration** — Auto-tags prompts with current Git branch
 
+### 🧪 v1.2: Professional Prompt Engineering (NEW!)
+
+- **🧪 Prompt Testing** — Test prompts against expected outputs with `promptvault test`
+- **📜 Version History** — Git-like versioning with `promptvault history`, `diff`, `revert`
+- **🤖 AI-Assisted Authoring** — Smart suggestions, variable detection, quality scoring
+- **🔍 Decay Detection** — Audit prompts for issues with `promptvault audit`
+- **⏱️ Auto-Export Watch** — Watch mode for continuous export with `promptvault watch`
+
 ---
 
 ## Install
@@ -132,6 +140,25 @@ promptvault sync pull
 promptvault watch --format skill.md --output SKILL.md
 promptvault watch --format cursorrules --output .cursorrules --interval 2s
 
+# Test prompts before deploying
+promptvault test abc123
+promptvault test abc123 --input "test" --expected "output"
+promptvault test abc123 --history
+
+# View and manage version history
+promptvault history abc123
+promptvault diff abc123 1 2
+promptvault revert abc123 3
+
+# Create prompts with AI assistance
+promptvault create --ai
+promptvault create
+
+# Audit for decay and quality issues
+promptvault audit
+promptvault audit --severity critical
+promptvault audit --json
+
 # Show stats with beautiful formatting
 promptvault stats
 promptvault statistics        # alias
@@ -178,6 +205,12 @@ source ~/.bash_completion
 | `import` | `imp` | Import from JSON |
 | `stats` | `statistics` | Show vault statistics |
 | `watch` | — | **NEW!** Auto-export on changes |
+| `test` | — | **NEW!** Test prompts |
+| `history` | — | **NEW!** View version history |
+| `diff` | — | **NEW!** Compare versions |
+| `revert` | — | **NEW!** Revert to version |
+| `create` | — | **NEW!** Create with AI assist |
+| `audit` | — | **NEW!** Audit for decay |
 
 ### Global Flags
 | Flag | Description |
@@ -258,7 +291,12 @@ Export your entire prompt library — or a stack subset — to any AI tool forma
 - [x] MCP server mode (use your vault in Cursor/Windsurf automatically)
 - [ ] Browser extension (save prompts from Claude.ai, ChatGPT)
 - [x] Prompt templates with `{{variable}}` support
-- [ ] Decay detection (prompts that may no longer work with newer models)
+- [x] Decay detection (prompts that may no longer work with newer models)
+- [x] Prompt testing framework
+- [x] Version history (Git-like versioning)
+- [x] AI-assisted authoring
+
+**Latest:** v1.2 - Professional Prompt Engineering (Testing, Versioning, AI-Assist, Decay Detection)
 
 Star the repo to stay updated ⭐
 

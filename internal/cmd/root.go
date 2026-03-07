@@ -1209,5 +1209,11 @@ func init() {
 		syncCmd,
 		completionCmd, // DX: Shell completion
 		watchCmd,      // DX: Watch mode
+		testCmd,       // DX: Test prompts
+		historyCmd,    // DX: Version history
+		diffCmd,       // DX: Version diff
+		revertCmd,     // DX: Version revert
+		createCmd,     // DX: AI-assisted create
+		auditCmd,      // DX: Decay audit
 	)
 }

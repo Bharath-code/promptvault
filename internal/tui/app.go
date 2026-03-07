@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -381,7 +382,12 @@ func (a *App) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.setStatus("✓ Prompt added!", false)
 			}
 		} else {
-			err = a.db.Update(ctx, p)
+			// Get username for author
+			author := os.Getenv("USER")
+			if author == "" {
+				author = "anonymous"
+			}
+			err = a.db.Update(ctx, p, "Edited in TUI", author)
 			if err == nil {
 				a.setStatus("✓ Prompt updated!", false)
 			}

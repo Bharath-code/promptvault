@@ -17,6 +17,50 @@ type Prompt struct {
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
+// TestResult represents the result of testing a prompt
+type TestResult struct {
+	ID              string    `json:"id"`
+	PromptID        string    `json:"prompt_id"`
+	Model           string    `json:"model"`
+	Input           string    `json:"input"`
+	ExpectedOutput  string    `json:"expected_output"`
+	ActualOutput    string    `json:"actual_output"`
+	Passed          bool      `json:"passed"`
+	Score           float64   `json:"score"` // 0-100 similarity score
+	LatencyMs       int       `json:"latency_ms"`
+	TokenUsage      int       `json:"token_usage"`
+	ErrorMessage    string    `json:"error_message,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// TestSuite represents a collection of tests for a prompt
+type TestSuite struct {
+	ID        string       `json:"id"`
+	PromptID  string       `json:"prompt_id"`
+	Name      string       `json:"name"`
+	Tests     []TestResult `json:"tests"`
+	PassRate  float64      `json:"pass_rate"` // Percentage of tests passed
+	AvgScore  float64      `json:"avg_score"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+// PromptVersion represents a versioned snapshot of a prompt
+type PromptVersion struct {
+	ID          string    `json:"id"`
+	PromptID    string    `json:"prompt_id"`
+	Version     int       `json:"version"`
+	Title       string    `json:"title"`
+	Content     string    `json:"content"`
+	Tags        []string  `json:"tags"`
+	Stack       string    `json:"stack"`
+	Models      []string  `json:"models"`
+	Verified    bool      `json:"verified"`
+	CommitMsg   string    `json:"commit_msg,omitempty"`
+	Author      string    `json:"author,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // DefaultStacks is the hierarchical tech stack taxonomy
 var DefaultStacks = []string{
 	// Frontend
