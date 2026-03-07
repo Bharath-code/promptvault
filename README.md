@@ -302,6 +302,25 @@ Star the repo to stay updated ⭐
 
 ---
 
+## 📚 Documentation
+
+### Complete Guides
+- **[📖 Command Reference (HTML)](docs/commands.html)** - Interactive web documentation
+- **[📝 Command Reference (Markdown)](docs/COMMANDS.md)** - Full documentation with examples
+- **[🧪 Testing Guide](docs/TESTING-GUIDE.md)** - Prompt testing best practices
+- **[📜 Versioning Guide](docs/VERSIONING-GUIDE.md)** - Version control for prompts
+- **[🤖 AI Authoring Guide](docs/AI-AUTHORING-GUIDE.md)** - AI-assisted creation
+- **[🔍 Decay Detection](docs/DECAY-DETECTION-GUIDE.md)** - Audit and maintenance
+
+### Quick Links
+- [Installation](#install)
+- [Quick Start](#quick-start)
+- [TUI Keybindings](#tui-keybindings)
+- [CLI Commands](#cli-commands--aliases)
+- [Export Formats](#export-formats)
+
+---
+
 ## Contributing
 
 ```sh

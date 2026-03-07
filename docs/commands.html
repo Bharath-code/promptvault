@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PromptVault - Complete Command Reference</title>
+    <meta name="description" content="Complete documentation for PromptVault CLI commands with examples">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Styles -->
+    <style>
+        :root {
+            --bg-base: #030305;
+            --bg-surface: rgba(15, 15, 20, 0.8);
+            --bg-surface-hover: rgba(25, 25, 35, 0.9);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-primary: #8b5cf6;
+            --accent-secondary: #06b6d4;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --font-heading: 'Inter', -apple-system, sans-serif;
+            --font-body: 'Inter', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg-base);
+            color: var(--text-main);
+            font-family: var(--font-body);
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+
+        /* Layout */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 3rem;
+        }
+
+        /* Sidebar Navigation */
+        .sidebar {
+            position: sticky;
+            top: 2rem;
+            height: calc(100vh - 4rem);
+            overflow-y: auto;
+            padding-right: 1rem;
+        }
+
+        .nav-section {
+            margin-bottom: 2rem;
+        }
+
+        .nav-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+        }
+
+        .nav-links {
+            list-style: none;
+        }
+
+        .nav-links li {
+            margin-bottom: 0.5rem;
+        }
+
+        .nav-links a {
+            display: block;
+            padding: 0.5rem 0.75rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .nav-links a:hover {
+            background: var(--bg-surface-hover);
+            color: var(--text-main);
+        }
+
+        .nav-links a.active {
+            background: rgba(139, 92, 246, 0.1);
+            color: var(--accent-primary);
+            border-left: 2px solid var(--accent-primary);
+        }
+
+        /* Main Content */
+        .content {
+            min-width: 0;
+        }
+
+        .doc-header {
+            margin-bottom: 3rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .doc-title {
+            font-family: var(--font-heading);
+            font-size: clamp(2rem, 4vw, 3rem);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .doc-subtitle {
+            font-size: 1.1rem;
+            color: var(--text-muted);
+        }
+
+        /* Sections */
+        .section {
+            margin-bottom: 4rem;
+        }
+
+        .section-title {
+            font-family: var(--font-heading);
+            font-size: 1.75rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid var(--accent-primary);
+        }
+
+        .subsection {
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            background: var(--bg-surface);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .command-name {
+            font-family: var(--font-mono);
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--accent-primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .command-aliases {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+
+        .command-aliases code {
+            background: rgba(139, 92, 246, 0.1);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            margin-right: 0.5rem;
+        }
+
+        /* Code Blocks */
+        pre {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1.25rem;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        code {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-secondary);
+        }
+
+        pre code {
+            color: var(--text-main);
+        }
+
+        .inline-code {
+            font-family: var(--font-mono);
+            background: rgba(139, 92, 246, 0.1);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: var(--accent-primary);
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            background: var(--bg-surface);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: rgba(139, 92, 246, 0.1);
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background: var(--bg-surface-hover);
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-new {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        .badge-critical {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
+        }
+
+        /* Quick Reference Card */
+        .quick-ref {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid var(--accent-primary);
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 2rem 0;
+        }
+
+        .quick-ref-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .quick-ref-item h4 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--accent-primary);
+            margin-bottom: 0.75rem;
+        }
+
+        .quick-ref-item ul {
+            list-style: none;
+        }
+
+        .quick-ref-item li {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .quick-ref-item code {
+            color: var(--text-main);
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                position: relative;
+                top: 0;
+                height: auto;
+                padding-right: 0;
+                margin-bottom: 2rem;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .subsection {
+                padding: 1rem;
+            }
+
+            table {
+                font-size: 0.85rem;
+            }
+
+            th, td {
+                padding: 0.5rem;
+            }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-base);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--accent-primary);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-secondary);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <nav>
+                <div class="nav-section">
+                    <div class="nav-title">Getting Started</div>
+                    <ul class="nav-links">
+                        <li><a href="#quick-start">Quick Start</a></li>
+                        <li><a href="#installation">Installation</a></li>
+                    </ul>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-title">Core Commands</div>
+                    <ul class="nav-links">
+                        <li><a href="#managing-prompts">Managing Prompts</a></li>
+                        <li><a href="#testing-quality">Testing & Quality</a></li>
+                        <li><a href="#version-control">Version Control</a></li>
+                        <li><a href="#export-integration">Export & Integration</a></li>
+                        <li><a href="#sync-backup">Sync & Backup</a></li>
+                        <li><a href="#utilities">Utilities</a></li>
+                    </ul>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-title">Advanced</div>
+                    <ul class="nav-links">
+                        <li><a href="#advanced-features">Advanced Features</a></li>
+                        <li><a href="#workflows">Real-World Workflows</a></li>
+                        <li><a href="#troubleshooting">Troubleshooting</a></li>
+                    </ul>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-title">Quick Reference</div>
+                    <ul class="nav-links">
+                        <li><a href="#quick-ref">Quick Ref Card</a></li>
+                    </ul>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <header class="doc-header">
+                <h1 class="doc-title">⚡ PromptVault Command Reference</h1>
+                <p class="doc-subtitle">Complete documentation with examples for all commands</p>
+                <p style="margin-top: 1rem; color: var(--text-muted);">
+                    <strong>Version:</strong> v1.2 &nbsp;|&nbsp; 
+                    <strong>Last Updated:</strong> March 2026
+                </p>
+            </header>
+
+            <section id="quick-start" class="section">
+                <h2 class="section-title">Quick Start</h2>
+                
+                <div class="subsection">
+                    <h3>Installation</h3>
+                    <pre><code># Install
+go install github.com/Bharath-code/promptvault@latest
+
+# Verify installation
+promptvault --version
+
+# Initialize with starter prompts
+promptvault init</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <h3>First Steps</h3>
+                    <pre><code># Open interactive TUI
+promptvault
+
+# Add your first prompt
+promptvault add "React Hook Debugging" \
+  --stack frontend/react/hooks \
+  --content "Analyze this React component..." \
+  --tags "debugging,react,hooks" \
+  --models "claude-sonnet,gpt-4o"
+
+# Search for prompts
+promptvault search "useEffect"
+
+# Export to Cursor
+promptvault export --format cursorrules --stack frontend/react > .cursorrules</code></pre>
+                </div>
+            </section>
+
+            <section id="managing-prompts" class="section">
+                <h2 class="section-title">Managing Prompts</h2>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault add</div>
+                    <div class="command-aliases">
+                        <span>Add a new prompt</span>
+                    </div>
+                    
+                    <pre><code># Basic usage
+promptvault add "Prompt Title" --content "Prompt content here"
+
+# With all options
+promptvault add "React Component Review" \
+  --stack frontend/react \
+  --tags "review,quality,best-practices" \
+  --models "claude-sonnet,gpt-4o" \
+  --verified \
+  --content "Review this React component..."
+
+# Preview before adding
+promptvault add "My Prompt" --content "..." --preview
+
+# From stdin
+cat prompt.txt | promptvault add "From File" --stack backend/python
+
+# Auto-detect stack
+cd my-react-project
+promptvault add "Component" --content "..."
+# → Auto-detects: frontend/react</code></pre>
+
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Flag</th>
+                                <th>Shorthand</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>--content</code></td>
+                                <td><code>-c</code></td>
+                                <td>Prompt content</td>
+                            </tr>
+                            <tr>
+                                <td><code>--stack</code></td>
+                                <td><code>-s</code></td>
+                                <td>Tech stack path</td>
+                            </tr>
+                            <tr>
+                                <td><code>--tags</code></td>
+                                <td>—</td>
+                                <td>Comma-separated tags</td>
+                            </tr>
+                            <tr>
+                                <td><code>--models</code></td>
+                                <td>—</td>
+                                <td>Model names</td>
+                            </tr>
+                            <tr>
+                                <td><code>--verified</code></td>
+                                <td>—</td>
+                                <td>Mark as verified</td>
+                            </tr>
+                            <tr>
+                                <td><code>--preview</code></td>
+                                <td>—</td>
+                                <td>Preview before adding</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault list</div>
+                    <div class="command-aliases">
+                        <code>ls</code> <code>show</code> <code>list-all</code>
+                        <span>List all prompts</span>
+                    </div>
+                    
+                    <pre><code># List all prompts
+promptvault list
+promptvault ls
+
+# Filter by stack
+promptvault list --stack frontend/react
+
+# Short output
+promptvault list --short
+
+# JSON output
+promptvault list --json | jq '.[] | .title'
+
+# Verbose/Debug mode
+promptvault list -v
+promptvault list -vd</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault search</div>
+                    <div class="command-aliases">
+                        <code>find</code> <code>query</code>
+                        <span>Full-text search</span>
+                    </div>
+                    
+                    <pre><code># Basic search
+promptvault search "useEffect dependencies"
+promptvault find "react hooks"
+
+# JSON output
+promptvault search "api" --json | jq 'length'</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault create</div>
+                    <div class="command-aliases">
+                        <span>Create with AI assistance</span>
+                        <span class="badge badge-new">NEW</span>
+                    </div>
+                    
+                    <pre><code># Standard interactive
+promptvault create
+
+# AI-assisted (requires API key)
+export ANTHROPIC_API_KEY=sk-ant-...
+promptvault create --ai</code></pre>
+
+                    <p style="margin-top: 1rem; color: var(--text-muted);">
+                        <strong>Features:</strong> Variable detection, tag recommendations, stack auto-detection, 
+                        anti-pattern warnings, quality scoring (0-100)
+                    </p>
+                </div>
+            </section>
+
+            <section id="testing-quality" class="section">
+                <h2 class="section-title">Testing & Quality</h2>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault test</div>
+                    <div class="command-aliases">
+                        <span>Test prompts</span>
+                        <span class="badge badge-new">NEW</span>
+                    </div>
+                    
+                    <pre><code># Interactive test
+promptvault test abc123
+
+# Single test
+promptvault test abc123 \
+  --input "Convert to TypeScript" \
+  --expected "TypeScript with types" \
+  --model claude-sonnet
+
+# View history
+promptvault test abc123 --history</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault audit</div>
+                    <div class="command-aliases">
+                        <span>Audit for decay</span>
+                        <span class="badge badge-new">NEW</span>
+                    </div>
+                    
+                    <pre><code># Full audit
+promptvault audit
+
+# Critical only
+promptvault audit --severity critical
+
+# JSON for CI/CD
+promptvault audit --json | jq '.issues_found'
+
+# CI check
+if [ $(promptvault audit --severity critical --json | jq '.issues_found') -gt 0 ]; then
+  echo "❌ Critical issues found"
+  exit 1
+fi</code></pre>
+
+                    <p style="margin-top: 1rem;">
+                        <span class="badge badge-critical">Critical</span> Deprecated models, low success rate<br>
+                        <span class="badge badge-warning" style="margin-top: 0.5rem;">Warning</span> Unused prompts (90+ days)<br>
+                        <span class="badge badge-new" style="margin-top: 0.5rem;">Info</span> Old versions (180+ days)
+                    </p>
+                </div>
+            </section>
+
+            <section id="version-control" class="section">
+                <h2 class="section-title">Version Control</h2>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault history</div>
+                    <div class="command-aliases">
+                        <span>View version history</span>
+                        <span class="badge badge-new">NEW</span>
+                    </div>
+                    
+                    <pre><code>promptvault history abc123
+
+# Output:
+📜 Version History: React Hook Converter
+▶ v5  2026-03-06 14:30  johndoe  Fixed edge case
+  v4  2026-03-06 11:15  johndoe  Added TypeScript
+  v3  2026-03-05 16:45  janedoe  Improved errors</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault diff</div>
+                    <div class="command-aliases">
+                        <span>Compare versions</span>
+                        <span class="badge badge-new">NEW</span>
+                    </div>
+                    
+                    <pre><code># Compare versions
+promptvault diff abc123 1 2
+
+# Compare with current
+promptvault diff abc123 3 HEAD
+
+# Compare last two
+promptvault diff abc123 HEAD~1 HEAD</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault revert</div>
+                    <div class="command-aliases">
+                        <span>Revert to version</span>
+                        <span class="badge badge-new">NEW</span>
+                    </div>
+                    
+                    <pre><code># Revert to version 3
+promptvault revert abc123 3
+
+# With message
+promptvault revert abc123 3 -m "Reverting broken changes"</code></pre>
+                </div>
+            </section>
+
+            <section id="export-integration" class="section">
+                <h2 class="section-title">Export & Integration</h2>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault export</div>
+                    <div class="command-aliases">
+                        <code>exp</code>
+                        <span>Export prompts</span>
+                    </div>
+                    
+                    <pre><code># Export to SKILL.md
+promptvault export --format skill.md --output SKILL.md
+
+# Export specific stack
+promptvault export --format cursorrules --stack frontend/react
+
+# Export to AGENTS.md
+promptvault export --format agents.md > AGENTS.md</code></pre>
+
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Format</th>
+                                <th>Command</th>
+                                <th>Use Case</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>skill.md</code></td>
+                                <td><code>--format skill.md</code></td>
+                                <td>Claude Code skills</td>
+                            </tr>
+                            <tr>
+                                <td><code>agents.md</code></td>
+                                <td><code>--format agents.md</code></td>
+                                <td>OpenAI Agents</td>
+                            </tr>
+                            <tr>
+                                <td><code>cursorrules</code></td>
+                                <td><code>--format cursorrules</code></td>
+                                <td>Cursor IDE</td>
+                            </tr>
+                            <tr>
+                                <td><code>windsurf</code></td>
+                                <td><code>--format windsurf</code></td>
+                                <td>Windsurf IDE</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault watch</div>
+                    <div class="command-aliases">
+                        <span>Auto-export on changes</span>
+                        <span class="badge badge-new">NEW</span>
+                    </div>
+                    
+                    <pre><code># Basic watch
+promptvault watch --format skill.md --output SKILL.md
+
+# Custom interval
+promptvault watch --format cursorrules -o .cursorrules --interval 2s
+
+# Filter by stack
+promptvault watch -f skill.md -o REACT.md -s frontend/react</code></pre>
+                </div>
+            </section>
+
+            <section id="sync-backup" class="section">
+                <h2 class="section-title">Sync & Backup</h2>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault sync push</div>
+                    <div class="command-aliases">
+                        <span>Backup to GitHub Gist</span>
+                    </div>
+                    
+                    <pre><code># Backup to Gist
+promptvault sync push --token &lt;gh_token&gt;
+
+# Token from env
+export PROMPTVAULT_GITHUB_TOKEN=ghp_...
+promptvault sync push</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault sync pull</div>
+                    <div class="command-aliases">
+                        <span>Restore from Gist</span>
+                    </div>
+                    
+                    <pre><code># Restore from Gist
+promptvault sync pull --token &lt;gh_token&gt;</code></pre>
+                </div>
+            </section>
+
+            <section id="utilities" class="section">
+                <h2 class="section-title">Utilities</h2>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault stats</div>
+                    <div class="command-aliases">
+                        <code>statistics</code>
+                        <span>Show statistics</span>
+                    </div>
+                    
+                    <pre><code>promptvault stats
+promptvault statistics
+
+# Output:
+⚡ PromptVault Statistics
+────────────────────────────────────────
+  Total Prompts:        156
+  Unique Stacks:        14
+  Database Path:        ~/.promptvault/vault.db</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <div class="command-name">promptvault completion</div>
+                    <div class="command-aliases">
+                        <span>Generate shell completion</span>
+                    </div>
+                    
+                    <pre><code># Bash
+promptvault completion bash > ~/.bash_completion
+source ~/.bash_completion
+
+# Zsh
+promptvault completion zsh > "${fpath[1]}/_promptvault"
+
+# Fish
+promptvault completion fish > ~/.config/fish/completions/promptvault.fish</code></pre>
+                </div>
+            </section>
+
+            <section id="advanced-features" class="section">
+                <h2 class="section-title">Advanced Features</h2>
+
+                <div class="subsection">
+                    <h3>Global Flags</h3>
+                    <pre><code># Verbose output
+promptvault list -v
+
+# Debug output (with timestamps)
+promptvault list -vd
+
+# Help
+promptvault --help
+promptvault list --help</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <h3>JSON Output for Scripting</h3>
+                    <pre><code># Count prompts
+promptvault list --json | jq 'length'
+
+# Filter by stack
+promptvault list --json | \
+  jq '.[] | select(.stack | contains("react"))'
+
+# Find unused
+promptvault list --json | \
+  jq '.[] | select(.usage_count == 0) | .title'
+
+# Count by stack
+promptvault list --json | \
+  jq 'group_by(.stack) | map({stack: .[0].stack, count: length})'</code></pre>
+                </div>
+            </section>
+
+            <section id="quick-ref" class="section">
+                <h2 class="section-title">Quick Reference Card</h2>
+                
+                <div class="quick-ref">
+                    <div class="quick-ref-grid">
+                        <div class="quick-ref-item">
+                            <h4>Manage Prompts</h4>
+                            <ul>
+                                <li><code>add</code> Create new</li>
+                                <li><code>list</code> List all (ls, show)</li>
+                                <li><code>search</code> Find (find, query)</li>
+                                <li><code>get</code> Get & copy (fetch)</li>
+                                <li><code>delete</code> Remove (rm)</li>
+                                <li><code>create</code> AI-assisted</li>
+                            </ul>
+                        </div>
+
+                        <div class="quick-ref-item">
+                            <h4>Test & Quality</h4>
+                            <ul>
+                                <li><code>test</code> Test prompt</li>
+                                <li><code>audit</code> Find issues</li>
+                            </ul>
+                        </div>
+
+                        <div class="quick-ref-item">
+                            <h4>Version Control</h4>
+                            <ul>
+                                <li><code>history</code> View versions</li>
+                                <li><code>diff</code> Compare</li>
+                                <li><code>revert</code> Restore</li>
+                            </ul>
+                        </div>
+
+                        <div class="quick-ref-item">
+                            <h4>Export & Sync</h4>
+                            <ul>
+                                <li><code>export</code> Export (exp)</li>
+                                <li><code>watch</code> Auto-export</li>
+                                <li><code>import</code> Import (imp)</li>
+                                <li><code>sync</code> Backup/restore</li>
+                            </ul>
+                        </div>
+
+                        <div class="quick-ref-item">
+                            <h4>Utilities</h4>
+                            <ul>
+                                <li><code>stats</code> Statistics</li>
+                                <li><code>stacks</code> List stacks</li>
+                                <li><code>mcp</code> MCP server</li>
+                                <li><code>init</code> Initialize</li>
+                                <li><code>completion</code> Shell completion</li>
+                            </ul>
+                        </div>
+
+                        <div class="quick-ref-item">
+                            <h4>Flags</h4>
+                            <ul>
+                                <li><code>-v</code> Verbose</li>
+                                <li><code>-d</code> Debug</li>
+                                <li><code>--json</code> JSON output</li>
+                                <li><code>--preview</code> Preview</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="troubleshooting" class="section">
+                <h2 class="section-title">Troubleshooting</h2>
+
+                <div class="subsection">
+                    <h3>Common Issues</h3>
+                    
+                    <h4 style="margin-top: 1rem; color: var(--text-main);">"Command not found"</h4>
+                    <pre><code># Check installation
+which promptvault
+
+# Reinstall
+go install github.com/Bharath-code/promptvault@latest
+
+# Add to PATH
+export PATH=$PATH:$(go env GOPATH)/bin</code></pre>
+
+                    <h4 style="margin-top: 1rem; color: var(--text-main);">"Database locked"</h4>
+                    <pre><code># Close other instances
+pkill -f promptvault
+
+# Remove WAL files
+rm ~/.promptvault/vault.db-wal
+rm ~/.promptvault/vault.db-shm</code></pre>
+
+                    <h4 style="margin-top: 1rem; color: var(--text-main);">"API key not set"</h4>
+                    <pre><code># Set API keys
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...</code></pre>
+                </div>
+
+                <div class="subsection">
+                    <h3>Getting Help</h3>
+                    <pre><code># General help
+promptvault --help
+
+# Command help
+promptvault list --help
+promptvault test --help
+
+# Debug mode
+promptvault list -vd
+
+# Check version
+promptvault --version</code></pre>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // Smooth scroll for navigation
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Active link highlighting
+        const sections = document.querySelectorAll('section');
+        const navLinks = document.querySelectorAll('.nav-links a');
+
+        window.addEventListener('scroll', () => {
+            let current = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                const sectionHeight = section.clientHeight;
+                if (scrollY >= (sectionTop - 200)) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href') === `#${current}`) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
