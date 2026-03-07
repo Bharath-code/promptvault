@@ -76,7 +76,7 @@
 **Quick Actions:**
 - `c` - Copy selected
 - `r` - Refresh list
-- `s` - Show stats (planned)
+- `s` - Show stats
 
 **Other:**
 - `?` - This help menu
@@ -91,6 +91,61 @@
   - Updated `handleKey()` to show/hide menu
   - Updated `View()` to render menu
   - Updated status bar hint
+
+---
+
+### 3. Usage Statistics Dashboard (s Key) ✅
+
+**File:** `internal/tui/app.go`, `internal/tui/styles.go`
+
+**Features:**
+- ✅ Press `s` to show statistics
+- ✅ Total prompts and usage count
+- ✅ Top 5 stacks with medals (🥇🥈🥉)
+- ✅ Top 5 most used prompts
+- ✅ Clean, centered overlay design
+- ✅ Any key closes dashboard
+
+**Usage:**
+```
+# In TUI, press s to show stats
+# Press any key to close
+```
+
+**Statistics Shown:**
+- Total Prompts count
+- Total Usage (copies)
+- Top Stacks (by prompt count)
+- Most Used Prompts (by usage count)
+
+**Example Output:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  📊 PromptVault Statistics                                  │
+├─────────────────────────────────────────────────────────────┤
+│  Total Prompts:        156                                  │
+│  Total Usage:          1,234                                │
+│                                                             │
+│  Top Stacks:                                                │
+│  🥇 frontend/react          45 prompts                      │
+│  🥈 backend/python          32 prompts                      │
+│  🥉 devops/docker          28 prompts                      │
+│                                                             │
+│  Most Used Prompts:                                         │
+│  🥇 React Hook Converter          89x                       │
+│  🥈 TypeScript Types              67x                       │
+│  🥉 Docker Multi-stage            54x                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Files Modified:**
+- `internal/tui/app.go` (~100 lines added)
+  - New `stateStats` state
+  - New `renderStats()` function
+  - Updated `handleKey()` to show/hide stats
+  - Updated `handleListKey()` for 's' key
+  - Updated `View()` to render stats
+- `internal/tui/styles.go` (added colorInfo)
 
 ---
 

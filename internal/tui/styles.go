@@ -7,6 +7,7 @@ var (
 	colorPrimary  = lipgloss.Color("#7C3AED") // Vibrant purple
 	colorAccent   = lipgloss.Color("#06B6D4") // Cyan accent
 	colorSuccess  = lipgloss.Color("#10B981") // Emerald green
+	colorInfo     = lipgloss.Color("#3B82F6") // Blue
 	colorDanger   = lipgloss.Color("#EF4444") // Red
 	colorWarning  = lipgloss.Color("#F59E0B") // Amber
 	colorText     = lipgloss.Color("#E2E8F0") // Slate-200

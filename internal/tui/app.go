@@ -31,6 +31,7 @@ const (
 	stateCopied
 	stateFillVars
 	stateHelpMenu // Quick action menu
+	stateStats    // Statistics dashboard
 )
 
 // App is the root Bubble Tea model
@@ -221,8 +222,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// If in help menu, any key closes it except special keys
-	if a.state == stateHelpMenu {
+	// If in help menu or stats, any key closes it except special keys
+	if a.state == stateHelpMenu || a.state == stateStats {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return a, tea.Quit
@@ -338,6 +339,15 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.loading = true
 		return a, a.loadPrompts()
 
+	case "s":
+		// Toggle stats dashboard
+		if a.state == stateStats {
+			a.state = stateList
+		} else {
+			a.state = stateStats
+		}
+		return a, nil
+
 	case "?":
 		// Toggle help menu
 		if a.state == stateHelpMenu {
@@ -348,6 +358,10 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "esc":
+		if a.state == stateStats || a.state == stateHelpMenu {
+			a.state = stateList
+			return a, nil
+		}
 		a.state = stateList
 		a.stackFilter = ""
 		a.loading = true
@@ -514,6 +528,8 @@ func (a *App) View() string {
 		}
 	case stateHelpMenu:
 		return a.renderHelpMenu()
+	case stateStats:
+		return a.renderStats()
 	}
 
 	return a.renderMain()
@@ -890,6 +906,118 @@ func (a *App) renderHelpMenu() string {
 			"",
 			helpStyle.Render("Press any key to close"),
 		))
+
+	return lipgloss.NewStyle().
+		Width(a.width).
+		Height(a.height).
+		Align(lipgloss.Center, lipgloss.Center).
+		Render(msg)
+}
+
+func (a *App) renderStats() string {
+	// Get stats from database
+	total := len(a.prompts)
+	totalUsage := 0
+	stackCounts := make(map[string]int)
+	
+	for _, p := range a.prompts {
+		totalUsage += p.UsageCount
+		if p.Stack != "" {
+			stackCounts[p.Stack]++
+		}
+	}
+	
+	// Get top stacks
+	type stackCount struct {
+		stack string
+		count int
+	}
+	var stacks []stackCount
+	for s, c := range stackCounts {
+		stacks = append(stacks, stackCount{s, c})
+	}
+	// Sort by count
+	for i := 0; i < len(stacks)-1; i++ {
+		for j := i + 1; j < len(stacks); j++ {
+			if stacks[j].count > stacks[i].count {
+				stacks[i], stacks[j] = stacks[j], stacks[i]
+			}
+		}
+	}
+	// Take top 5
+	if len(stacks) > 5 {
+		stacks = stacks[:5]
+	}
+	
+	// Get most used prompts
+	type promptUsage struct {
+		title string
+		count int
+	}
+	var usage []promptUsage
+	for _, p := range a.prompts {
+		if p.UsageCount > 0 {
+			usage = append(usage, promptUsage{p.Title, p.UsageCount})
+		}
+	}
+	// Sort by usage
+	for i := 0; i < len(usage)-1; i++ {
+		for j := i + 1; j < len(usage); j++ {
+			if usage[j].count > usage[i].count {
+				usage[i], usage[j] = usage[j], usage[i]
+			}
+		}
+	}
+	// Take top 5
+	if len(usage) > 5 {
+		usage = usage[:5]
+	}
+	
+	// Build stats display
+	var lines []string
+	lines = append(lines, panelHeaderStyle.Render(" 📊 PromptVault Statistics"))
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("  %-20s  %d", "Total Prompts:", total))
+	lines = append(lines, fmt.Sprintf("  %-20s  %d", "Total Usage:", totalUsage))
+	lines = append(lines, "")
+	
+	// Top stacks
+	lines = append(lines, panelHeaderStyle.Render(" Top Stacks"))
+	for i, s := range stacks {
+		medal := "  "
+		if i == 0 {
+			medal = "🥇"
+		} else if i == 1 {
+			medal = "🥈"
+		} else if i == 2 {
+			medal = "🥉"
+		}
+		lines = append(lines, fmt.Sprintf("  %s %-25s %d", medal, s.stack, s.count))
+	}
+	lines = append(lines, "")
+	
+	// Most used
+	lines = append(lines, panelHeaderStyle.Render(" Most Used Prompts"))
+	for i, u := range usage {
+		medal := "  "
+		if i == 0 {
+			medal = "🥇"
+		} else if i == 1 {
+			medal = "🥈"
+		} else if i == 2 {
+			medal = "🥉"
+		}
+		lines = append(lines, fmt.Sprintf("  %s %-30s %dx", medal, u.title, u.count))
+	}
+	
+	content := strings.Join(lines, "\n")
+	
+	msg := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPrimary).
+		Padding(2, 4).
+		Width(70).
+		Render(content)
 
 	return lipgloss.NewStyle().
 		Width(a.width).
