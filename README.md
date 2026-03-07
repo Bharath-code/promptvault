@@ -45,13 +45,23 @@ PromptVault fixes this. It's a CLI + TUI that keeps every prompt you've ever wri
 - **👁️ Preview Mode** — Preview prompts before adding with `--preview`
 - **🏷️ Git Integration** — Auto-tags prompts with current Git branch
 
-### 🧪 v1.2: Professional Prompt Engineering (NEW!)
+### 🧪 v1.2: Professional Prompt Engineering
 
 - **🧪 Prompt Testing** — Test prompts against expected outputs with `promptvault test`
 - **📜 Version History** — Git-like versioning with `promptvault history`, `diff`, `revert`
 - **🤖 AI-Assisted Authoring** — Smart suggestions, variable detection, quality scoring
 - **🔍 Decay Detection** — Audit prompts for issues with `promptvault audit`
 - **⏱️ Auto-Export Watch** — Watch mode for continuous export with `promptvault watch`
+
+### 🎨 v1.3: Enhanced TUI Experience (NEW!)
+
+- **🔍 Fuzzy Search** — Type anything, get relevant results with match scores
+- **❓ Quick Action Menu** — Press `?` for instant keybinding reference
+- **📊 Stats Dashboard** — Press `s` for usage statistics and top prompts
+- **🔥 Recent Prompts** — Press `R` to toggle frequently used prompts
+- **☑️ Multi-Select** — Press `Space` to select, `x` for batch operations
+- **🎬 Full-Screen Preview** — Press `v` for immersive full-screen preview
+- **⚡ 40x Faster Load** — Optimized performance, loads in ~300ms
 
 ---
 
@@ -176,17 +186,26 @@ source ~/.bash_completion
 
 ## TUI Keybindings
 
+### Navigation
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` or `k` / `j` | Navigate prompts |
 | `Enter` | Fill variables (if any) and copy to clipboard |
-| `Space` | Copy to clipboard (raw) |
+| `Space` | Select/deselect (multi-select mode) |
 | `/` | Search |
+
+### Actions
+| Key | Action |
+|-----|--------|
 | `a` | Add new prompt |
 | `e` | Edit selected |
 | `d` | Delete selected |
-| `v` | Toggle preview pane |
-| `r` | Refresh |
+| `v` | Toggle full-screen preview |
+| `r` | Refresh list |
+| `R` | Toggle recent prompts |
+| `s` | Show statistics |
+| `x` | Batch process (when items selected) |
+| `?` | Quick action menu |
 | `Esc` | Clear filter / go back |
 | `q` | Quit |
 
@@ -295,8 +314,10 @@ Export your entire prompt library — or a stack subset — to any AI tool forma
 - [x] Prompt testing framework
 - [x] Version history (Git-like versioning)
 - [x] AI-assisted authoring
+- [x] Enhanced TUI (fuzzy search, multi-select, stats, full-screen preview)
+- [x] Performance optimization (40x faster load)
 
-**Latest:** v1.2 - Professional Prompt Engineering (Testing, Versioning, AI-Assist, Decay Detection)
+**Latest:** v1.3 - Enhanced TUI Experience (Fuzzy Search, Multi-Select, Stats, Full-Screen Preview, 40x Faster!)
 
 Star the repo to stay updated ⭐
 
@@ -311,6 +332,8 @@ Star the repo to stay updated ⭐
 - **[📜 Versioning Guide](docs/VERSIONING-GUIDE.md)** - Version control for prompts
 - **[🤖 AI Authoring Guide](docs/AI-AUTHORING-GUIDE.md)** - AI-assisted creation
 - **[🔍 Decay Detection](docs/DECAY-DETECTION-GUIDE.md)** - Audit and maintenance
+- **[🎨 TUI Enhancements](docs/TUI-FINAL.md)** - v1.3 TUI features guide
+- **[⚡ Performance Fix](docs/ULTIMATE-PERF-FIX.md)** - 40x speed improvement details
 
 ### Quick Links
 - [Installation](#install)

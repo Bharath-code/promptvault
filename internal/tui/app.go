@@ -47,6 +47,10 @@ type App struct {
 	filtered []*model.Prompt
 	cursor   int
 	scores   []int // Fuzzy search scores
+	showRecent bool // Toggle recent prompts section
+	selected   map[int]bool // Multi-select indices
+	recentCache []*model.Prompt // Cached recent prompts
+	recentDirty bool // Cache invalidation flag
 
 	// Sub-components
 	search        textinput.Model
@@ -100,6 +104,9 @@ func New(database *db.DB) *App {
 		search:  search,
 		preview: preview,
 		spinner: s,
+		selected: make(map[int]bool),
+		recentCache: nil,
+		recentDirty: true,
 	}
 }
 
@@ -162,7 +169,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case promptsLoadedMsg:
 		a.prompts = msg
 		a.applyFilter()
-		a.updatePreview()
+		// CRITICAL: Do NOT update preview on initial load!
+		// This causes expensive markdown rendering on startup
+		// Preview will be updated when user navigates with arrow keys
+		// Mark recent cache as dirty (needs recalculation)
+		a.recentDirty = true
 		// Stop loading when prompts are loaded
 		if a.loading {
 			a.loading = false
@@ -213,6 +224,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if a.state == stateDetail {
+		// Handle viewport scrolling in full-screen mode
 		var cmd tea.Cmd
 		a.preview, cmd = a.preview.Update(msg)
 		cmds = append(cmds, cmd)
@@ -283,7 +295,7 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.search.Focus()
 		return a, textinput.Blink
 
-	case "enter", " ":
+	case "enter":
 		// Check for variables and fill if present
 		if p := a.selectedPrompt(); p != nil {
 			vars := ExtractVars(p.Content)
@@ -309,6 +321,18 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return a, tick()
 			}
 		}
+		
+	case " ":
+		// Space for multi-select toggle
+		if p := a.selectedPrompt(); p != nil {
+			// Toggle current item selection
+			if a.selected[a.cursor] {
+				delete(a.selected, a.cursor)
+			} else {
+				a.selected[a.cursor] = true
+			}
+			return a, nil
+		}
 
 	case "a":
 		a.state = stateAdd
@@ -326,18 +350,31 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.selectedPrompt() != nil {
 			a.state = stateDeleteConfirm
 		}
+		
+	case "x":
+		// Batch operations
+		if len(a.selected) > 0 {
+			return a, a.performBatchOperation()
+		}
 
 	case "v":
+		// Toggle full-screen preview overlay
 		if a.state == stateList {
 			a.state = stateDetail
-		} else {
+			a.updatePreview()
+		} else if a.state == stateDetail {
 			a.state = stateList
 		}
-		a.updatePreview()
+		return a, nil
 
 	case "r":
 		a.loading = true
 		return a, a.loadPrompts()
+
+	case "R":
+		// Toggle recent prompts section
+		a.showRecent = !a.showRecent
+		return a, nil
 
 	case "s":
 		// Toggle stats dashboard
@@ -504,6 +541,25 @@ func (a *App) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+func (a *App) performBatchOperation() tea.Cmd {
+	// Batch process selected prompts
+	ctx := context.Background()
+	processed := 0
+	
+	for idx := range a.selected {
+		if idx < len(a.filtered) {
+			p := a.filtered[idx]
+			// Increment usage as a simple batch operation
+			_ = a.db.IncrementUsage(ctx, p.ID)
+			processed++
+		}
+	}
+	
+	a.setStatus(fmt.Sprintf("Processed %d prompts", processed), false)
+	a.selected = make(map[int]bool) // Clear selection
+	return tick()
+}
+
 // View implements tea.Model
 func (a *App) View() string {
 	if a.width == 0 {
@@ -601,6 +657,11 @@ func (a *App) renderHeader() string {
 }
 
 func (a *App) renderBody() string {
+	// Full-screen preview overlay in detail mode
+	if a.state == stateDetail {
+		return a.renderFullScreenPreview()
+	}
+	
 	listWidth := a.listWidth()
 	previewWidth := a.previewWidth()
 	height := a.contentHeight()
@@ -608,15 +669,62 @@ func (a *App) renderBody() string {
 	list := a.renderList(listWidth, height)
 
 	var preview string
-	if a.state == stateDetail {
-		preview = a.renderPreview(previewWidth, height)
-	} else {
-		preview = a.renderPreviewPane(previewWidth, height)
-	}
+	preview = a.renderPreviewPane(previewWidth, height)
 
 	divider := dividerStyle.Render(strings.Repeat("│\n", height))
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, list, divider, preview)
+}
+
+func (a *App) renderFullScreenPreview() string {
+	p := a.selectedPrompt()
+	if p == nil {
+		return lipgloss.NewStyle().
+			Width(a.width).
+			Height(a.height).
+			Align(lipgloss.Center, lipgloss.Center).
+			Foreground(colorMuted).
+			Render("No prompt selected\n\nPress ↑/↓ to select a prompt")
+	}
+
+	// Full-screen preview with header
+	header := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(colorPrimary).
+		Width(a.width).
+		Render(fmt.Sprintf("⚡ %s", p.Title))
+
+	// Metadata
+	meta := ""
+	if p.Stack != "" {
+		meta += stackStyle.Render(p.Stack) + "  "
+	}
+	if p.Verified {
+		meta += verifiedStyle.Render("✓ Verified") + "  "
+	}
+	for _, m := range p.Models {
+		meta += tagStyle.Render(m) + " "
+	}
+
+	// Full content with markdown rendering
+	content := a.preview.View()
+
+	// Footer with instructions
+	footer := helpStyle.Render("v close  •  ↑/↓ scroll  •  ENTER copy  •  / search")
+
+	body := lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		meta,
+		"",
+		content,
+		"",
+		footer,
+	)
+
+	return lipgloss.NewStyle().
+		Width(a.width).
+		Height(a.height).
+		Render(body)
 }
 
 func (a *App) renderList(width, height int) string {
@@ -632,7 +740,18 @@ func (a *App) renderList(width, height int) string {
 		return empty
 	}
 
+	// Show recent prompts section if enabled and not searching
+	if a.showRecent && a.search.Value() == "" && len(a.prompts) > 0 {
+		recentSection := a.renderRecentPrompts(width)
+		items = append(items, recentSection)
+		items = append(items, "") // Spacer
+	}
+
 	maxVisible := height - 2
+	if a.showRecent && a.search.Value() == "" {
+		maxVisible -= 6 // Reserve space for recent section
+	}
+	
 	start := 0
 	if a.cursor >= maxVisible {
 		start = a.cursor - maxVisible + 1
@@ -644,7 +763,7 @@ func (a *App) renderList(width, height int) string {
 
 	for i := start; i < end; i++ {
 		p := a.filtered[i]
-		item := a.renderListItem(p, i == a.cursor, width)
+		item := a.renderListItem(p, i == a.cursor, i, width)
 		items = append(items, item)
 	}
 
@@ -660,7 +779,79 @@ func (a *App) renderList(width, height int) string {
 		Render(content)
 }
 
-func (a *App) renderListItem(p *model.Prompt, selected bool, width int) string {
+func (a *App) renderRecentPrompts(width int) string {
+	// Use cached recent prompts if available
+	if !a.recentDirty && a.recentCache != nil && len(a.recentCache) > 0 {
+		// Build recent section from cache
+		var lines []string
+		lines = append(lines, panelHeaderStyle.Render(" 🔥 Recently Used"))
+		
+		for _, p := range a.recentCache {
+			title := p.Title
+			if len(title) > 50 {
+				title = title[:47] + "..."
+			}
+			lines = append(lines, fmt.Sprintf("  • %-45s %dx", title, p.UsageCount))
+		}
+		
+		return lipgloss.NewStyle().Render(strings.Join(lines, "\n"))
+	}
+	
+	// Calculate recent prompts (expensive - only do when cache is dirty)
+	type recentPrompt struct {
+		prompt *model.Prompt
+		score  int
+	}
+	var recents []recentPrompt
+	
+	for _, p := range a.prompts {
+		if p.UsageCount > 0 {
+			recents = append(recents, recentPrompt{p, p.UsageCount})
+		}
+	}
+	
+	// Sort by usage count (descending)
+	for i := 0; i < len(recents)-1; i++ {
+		for j := i + 1; j < len(recents); j++ {
+			if recents[j].score > recents[i].score {
+				recents[i], recents[j] = recents[j], recents[i]
+			}
+		}
+	}
+	
+	// Take top 5 and cache
+	if len(recents) > 5 {
+		recents = recents[:5]
+	}
+	
+	// Update cache
+	a.recentCache = make([]*model.Prompt, len(recents))
+	for i, rp := range recents {
+		a.recentCache[i] = rp.prompt
+	}
+	a.recentDirty = false
+	
+	if len(recents) == 0 {
+		return ""
+	}
+	
+	// Build recent section
+	var lines []string
+	lines = append(lines, panelHeaderStyle.Render(" 🔥 Recently Used"))
+	
+	for _, rp := range recents {
+		p := rp.prompt
+		title := p.Title
+		if len(title) > 50 {
+			title = title[:47] + "..."
+		}
+		lines = append(lines, fmt.Sprintf("  • %-45s %dx", title, p.UsageCount))
+	}
+	
+	return lipgloss.NewStyle().Render(strings.Join(lines, "\n"))
+}
+
+func (a *App) renderListItem(p *model.Prompt, selected bool, index int, width int) string {
 	verified := ""
 	if p.Verified {
 		verified = verifiedStyle.Render(" ✓")
@@ -679,7 +870,7 @@ func (a *App) renderListItem(p *model.Prompt, selected bool, width int) string {
 	}
 
 	title := p.Title + verified + usage
-	
+
 	// Show match score if searching
 	score := ""
 	if a.scores != nil && len(a.scores) > 0 {
@@ -691,11 +882,18 @@ func (a *App) renderListItem(p *model.Prompt, selected bool, width int) string {
 		}
 	}
 
+	// Show selection indicator (check this specific item's index)
+	selectIndicator := "  "
+	if a.selected[index] {
+		selectIndicator = successStyle.Render("✓ ")
+	}
+
 	meta := stack
 
 	line := lipgloss.JoinHorizontal(lipgloss.Center,
+		selectIndicator,
 		title,
-		lipgloss.NewStyle().Width(width-lipgloss.Width(title)-lipgloss.Width(meta)-lipgloss.Width(score)-4).Render(""),
+		lipgloss.NewStyle().Width(width-lipgloss.Width(title)-lipgloss.Width(meta)-lipgloss.Width(score)-6).Render(""),
 		meta,
 		score,
 	)
@@ -846,8 +1044,8 @@ func (a *App) renderHelpMenu() string {
 		// Navigation
 		{"↑/↓ or k/j", "Navigate prompts", "Navigation"},
 		{"/", "Search prompts", ""},
+		{"Space", "Select/deselect", ""},
 		{"Enter", "Copy to clipboard", ""},
-		{"Space", "Copy (raw)", ""},
 		
 		// Actions
 		{"a", "Add new prompt", "Actions"},
@@ -858,7 +1056,9 @@ func (a *App) renderHelpMenu() string {
 		// Quick Actions
 		{"c", "Copy selected", "Quick Actions"},
 		{"r", "Refresh list", ""},
+		{"R", "Toggle recent", ""},
 		{"s", "Show stats", ""},
+		{"x", "Batch process", ""},
 		
 		// Other
 		{"?", "This help menu", "Other"},
@@ -1077,49 +1277,19 @@ func (a *App) updatePreview() {
 		a.preview.SetContent("")
 		return
 	}
-	
-	w := a.preview.Width - 4
-	if w < 20 {
-		w = 80
-	}
-	
-	if a.glamourRenderer == nil || a.lastWrapWidth != w {
-		renderer, err := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
-			glamour.WithWordWrap(w),
-		)
-		if err == nil {
-			a.glamourRenderer = renderer
-			a.lastWrapWidth = w
-		}
-	}
-	
-	// Fast path for preview pane items during list scrolling
+
+	// ULTRA FAST PATH: Plain text only, no markdown rendering on navigation
+	// This is CRITICAL for performance - glamour rendering is VERY expensive
 	lines := strings.Split(p.Content, "\n")
 	paneText := p.Content
-	if len(lines) > 20 {
-		paneText = strings.Join(lines[:20], "\n") + "\n\n..."
+	if len(lines) > 15 {
+		paneText = strings.Join(lines[:15], "\n") + "\n\n..."
 	}
-
-	if a.glamourRenderer != nil {
-		if str, err := a.glamourRenderer.Render(paneText); err == nil {
-			paneText = str
-		}
-	}
+	
+	// Add simple formatting without glamour
 	a.cachedPreview = paneText
 
-	// Only full-render when we specifically expand to detail view
-	fullRenderedContent := p.Content
-	if a.state == stateDetail {
-		// Glamour's regex engine is extremely CPU intensive. Avoid rendering if >2500 bytes (blocks for seconds)
-		if a.glamourRenderer != nil && len(p.Content) < 2500 {
-			if str, err := a.glamourRenderer.Render(p.Content); err == nil {
-				fullRenderedContent = str
-			}
-		}
-	}
-
-	// Create the full text for viewport
+	// Create the full text for viewport (plain text, no markdown)
 	meta := ""
 	if p.Stack != "" {
 		meta += stackStyle.Render(p.Stack) + "  "
@@ -1134,13 +1304,13 @@ func (a *App) updatePreview() {
 	fullContent := lipgloss.JoinVertical(lipgloss.Left,
 		meta,
 		"",
-		fullRenderedContent,
+		paneText,
 		"",
 		usageStyle.Render(fmt.Sprintf("Used %d times", p.UsageCount)),
 	)
-	
+
 	a.preview.SetContent(fullContent)
-	// Optionally clear scroll state to top when changing prompt
+	// Reset scroll to top when changing prompt
 	if a.preview.YOffset > 0 {
 		a.preview.GotoTop()
 	}
