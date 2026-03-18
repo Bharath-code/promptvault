@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Bharath-code/promptvault/internal/config"
 	"github.com/Bharath-code/promptvault/internal/db"
 	"github.com/Bharath-code/promptvault/internal/model"
 	"github.com/atotto/clipboard"
@@ -34,7 +35,9 @@ const (
 	stateStats
 	stateCommandPalette
 	stateOnboarding
-	stateStackTree // NEW: Stack tree navigation
+	stateStackTree
+	stateConfig
+	stateThemePreview
 )
 
 // Command represents a available command in palette
@@ -112,6 +115,10 @@ type App struct {
 
 	// Stack tree navigation
 	stackTree *StackTree
+
+	// Config view
+	themePreview *ThemePreview
+	configTab    int
 }
 
 type tickMsg time.Time
@@ -411,6 +418,40 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Theme preview keyboard handling
+	if a.state == stateThemePreview {
+		switch msg.String() {
+		case "esc":
+			a.state = stateList
+			a.themePreview = nil
+			return a, nil
+		case "q", "ctrl+c":
+			return a, tea.Quit
+		case "up", "k":
+			if a.themePreview != nil {
+				a.themePreview.MoveUp()
+			}
+			return a, nil
+		case "down", "j":
+			if a.themePreview != nil {
+				a.themePreview.MoveDown()
+			}
+			return a, nil
+		case "enter":
+			if a.themePreview != nil {
+				selected := a.themePreview.Select()
+				cfg, _ := config.Load()
+				cfg.Theme.Name = selected
+				cfg.Theme.Dark = *config.GetTheme(selected)
+				config.Save(cfg)
+				a.showSuccess("Theme changed to: " + selected)
+				a.state = stateList
+				a.themePreview = nil
+			}
+			return a, nil
+		}
+	}
+
 	switch a.state {
 
 	case stateList, stateDetail:
@@ -564,6 +605,10 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			a.state = stateHelpMenu
 		}
+		return a, nil
+
+	case "g":
+		a.openThemePreview()
 		return a, nil
 
 	case "esc":
@@ -759,6 +804,8 @@ func (a *App) View() string {
 		return a.renderOnboarding()
 	case stateStackTree:
 		return a.renderStackTree()
+	case stateThemePreview:
+		return a.renderThemePreview()
 	}
 
 	return a.renderMain()
@@ -1235,6 +1282,7 @@ func (a *App) renderHelpMenu() string {
 		{"s", "Show stats", ""},
 		{"x", "Batch process", ""},
 		{"t", "Stack tree", ""},
+		{"g", "Themes", ""},
 
 		// Other
 		{":", "Command palette", "Other"},
@@ -1630,6 +1678,29 @@ func (a *App) openStackTree() {
 	}
 	a.stackTree = NewStackTree(stacks, 40)
 	a.state = stateStackTree
+}
+
+func (a *App) renderThemePreview() string {
+	if a.themePreview == nil {
+		cfg, _ := config.Load()
+		a.themePreview = NewThemePreview(cfg.Theme.Name, a.width, a.height)
+	}
+
+	content := a.themePreview.Render()
+
+	return lipgloss.Place(a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#7C3AED")).
+			Padding(1, 2).
+			Render(content))
+}
+
+func (a *App) openThemePreview() {
+	cfg, _ := config.Load()
+	a.themePreview = NewThemePreview(cfg.Theme.Name, a.width, a.height)
+	a.state = stateThemePreview
 }
 
 func tick() tea.Cmd {
