@@ -243,9 +243,11 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 // showLoading displays a loading spinner with a message
 // Returns a done function that should be called when the operation is complete
+// Note: the returned function is idempotent and safe to call multiple times
 func showLoading(msg string) func() {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
+	var once sync.Once
 	wg.Add(1)
 
 	go func() {
@@ -254,7 +256,6 @@ func showLoading(msg string) func() {
 		for {
 			select {
 			case <-done:
-				// Clear the loading line completely
 				fmt.Printf("\r\033[2K\r")
 				return
 			default:
@@ -266,7 +267,9 @@ func showLoading(msg string) func() {
 	}()
 
 	return func() {
-		close(done)
+		once.Do(func() {
+			close(done)
+		})
 		wg.Wait()
 	}
 }
@@ -1291,7 +1294,7 @@ func init() {
 
 	// search-history command
 	searchHistoryCmd = &cobra.Command{
-		Use:   "history [subcommand]",
+		Use:   "search-history [subcommand]",
 		Short: "Manage search history",
 	}
 	searchHistoryListCmd = &cobra.Command{

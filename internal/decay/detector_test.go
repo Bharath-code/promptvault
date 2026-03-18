@@ -1,3 +1,5 @@
+//go:build fts5
+
 package decay
 
 import (
@@ -74,28 +76,28 @@ func TestDetector_CheckDeprecatedModel(t *testing.T) {
 	detector := NewDetector(database)
 
 	tests := []struct {
-		name    string
-		models  []string
+		name      string
+		models    []string
 		wantIssue bool
 	}{
 		{
-			name:    "deprecated gpt-3.5-turbo",
-			models:  []string{"gpt-3.5-turbo"},
+			name:      "deprecated gpt-3.5-turbo",
+			models:    []string{"gpt-3.5-turbo"},
 			wantIssue: true,
 		},
 		{
-			name:    "deprecated claude-2",
-			models:  []string{"claude-2"},
+			name:      "deprecated claude-2",
+			models:    []string{"claude-2"},
 			wantIssue: true,
 		},
 		{
-			name:    "current gpt-4o",
-			models:  []string{"gpt-4o"},
+			name:      "current gpt-4o",
+			models:    []string{"gpt-4o"},
 			wantIssue: false,
 		},
 		{
-			name:    "mixed models",
-			models:  []string{"gpt-4o", "claude-3-sonnet"},
+			name:      "mixed models",
+			models:    []string{"gpt-4o", "claude-3-sonnet"},
 			wantIssue: false,
 		},
 	}
@@ -103,9 +105,9 @@ func TestDetector_CheckDeprecatedModel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			prompt := &model.Prompt{
-				Title:  "Test",
+				Title:   "Test",
 				Content: "Content",
-				Models: tt.models,
+				Models:  tt.models,
 			}
 
 			issue := detector.checkDeprecatedModel(prompt)
@@ -191,15 +193,15 @@ func TestDetector_CheckLowSuccessRate(t *testing.T) {
 		// Manually create test results with low success rate
 		for i := 0; i < 5; i++ {
 			result := &model.TestResult{
-				ID:           fmt.Sprintf("test-low-%d", i),
-				PromptID:     prompt.ID,
-				Model:        "claude-sonnet",
-				Input:        "test",
+				ID:             fmt.Sprintf("test-low-%d", i),
+				PromptID:       prompt.ID,
+				Model:          "claude-sonnet",
+				Input:          "test",
 				ExpectedOutput: "expected",
-				ActualOutput: "actual",
-				Passed:       i < 2, // 2/5 = 40% pass rate
-				Score:        float64(i * 20),
-				CreatedAt:    time.Now(),
+				ActualOutput:   "actual",
+				Passed:         i < 2, // 2/5 = 40% pass rate
+				Score:          float64(i * 20),
+				CreatedAt:      time.Now(),
 			}
 			if err := database.SaveTestResult(ctx, result); err != nil {
 				t.Fatalf("SaveTestResult() error = %v", err)
@@ -228,15 +230,15 @@ func TestDetector_CheckLowSuccessRate(t *testing.T) {
 		// Create test results with high success rate
 		for i := 0; i < 5; i++ {
 			result := &model.TestResult{
-				ID:           fmt.Sprintf("test-high-%d", i),
-				PromptID:     prompt.ID,
-				Model:        "claude-sonnet",
-				Input:        "test",
+				ID:             fmt.Sprintf("test-high-%d", i),
+				PromptID:       prompt.ID,
+				Model:          "claude-sonnet",
+				Input:          "test",
 				ExpectedOutput: "expected",
-				ActualOutput: "actual",
-				Passed:       i >= 1, // 4/5 = 80% pass rate
-				Score:        float64(80 + i*4),
-				CreatedAt:    time.Now(),
+				ActualOutput:   "actual",
+				Passed:         i >= 1, // 4/5 = 80% pass rate
+				Score:          float64(80 + i*4),
+				CreatedAt:      time.Now(),
 			}
 			if err := database.SaveTestResult(ctx, result); err != nil {
 				t.Fatalf("SaveTestResult() error = %v", err)
@@ -294,10 +296,10 @@ func TestDetector_Audit(t *testing.T) {
 
 	// Create healthy prompt
 	healthy := &model.Prompt{
-		Title:     "Healthy",
-		Content:   "Content",
+		Title:      "Healthy",
+		Content:    "Content",
 		UsageCount: 10,
-		Models:    []string{"gpt-4o"},
+		Models:     []string{"gpt-4o"},
 	}
 	if err := database.Add(ctx, healthy); err != nil {
 		t.Fatalf("Add() error = %v", err)
@@ -305,10 +307,10 @@ func TestDetector_Audit(t *testing.T) {
 
 	// Create prompt with deprecated model
 	deprecated := &model.Prompt{
-		Title:     "Deprecated",
-		Content:   "Content",
+		Title:      "Deprecated",
+		Content:    "Content",
 		UsageCount: 5,
-		Models:    []string{"gpt-3.5-turbo"},
+		Models:     []string{"gpt-3.5-turbo"},
 	}
 	if err := database.Add(ctx, deprecated); err != nil {
 		t.Fatalf("Add() error = %v", err)
