@@ -119,6 +119,10 @@ type App struct {
 	// Config view
 	themePreview *ThemePreview
 	configTab    int
+
+	// Quick actions panel
+	quickActions     *QuickActionsPanel
+	showQuickActions bool
 }
 
 type tickMsg time.Time
@@ -147,6 +151,7 @@ func New(database *db.DB) *App {
 		recentCache:  nil,
 		recentDirty:  true,
 		toastManager: &ToastManager{maxCount: 5},
+		quickActions: NewQuickActionsPanel(25, 30),
 	}
 }
 
@@ -452,6 +457,31 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Quick actions panel keyboard handling
+	if a.showQuickActions && a.state == stateList {
+		switch msg.String() {
+		case "tab":
+			a.showQuickActions = false
+			return a, nil
+		case "up", "k":
+			if a.quickActions != nil {
+				a.quickActions.MoveUp()
+			}
+			return a, nil
+		case "down", "j":
+			if a.quickActions != nil {
+				a.quickActions.MoveDown()
+			}
+			return a, nil
+		case "enter":
+			if a.quickActions != nil {
+				key := a.quickActions.Execute()
+				return a, a.executeQuickAction(key)
+			}
+			return a, nil
+		}
+	}
+
 	switch a.state {
 
 	case stateList, stateDetail:
@@ -580,12 +610,15 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "s":
-		// Toggle stats dashboard
 		if a.state == stateStats {
 			a.state = stateList
 		} else {
 			a.state = stateStats
 		}
+		return a, nil
+
+	case "tab":
+		a.showQuickActions = !a.showQuickActions
 		return a, nil
 
 	case ":":
@@ -817,12 +850,38 @@ func (a *App) renderMain() string {
 	statusBar := a.renderStatusBar()
 	toastBar := a.toastManager.Render(a.width)
 
+	if a.showQuickActions {
+		actionsPanel := a.renderQuickActions()
+		mainContent := lipgloss.JoinVertical(lipgloss.Left,
+			header,
+			body,
+			toastBar,
+			statusBar,
+		)
+		return lipgloss.JoinHorizontal(lipgloss.Top,
+			mainContent,
+			actionsPanel,
+		)
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		body,
 		toastBar,
 		statusBar,
 	)
+}
+
+func (a *App) renderQuickActions() string {
+	if a.quickActions == nil {
+		return ""
+	}
+
+	builder := NewActionsBuilder()
+	a.quickActions.SetActions(builder.Simple())
+	a.quickActions.Show()
+
+	return a.quickActions.Render()
 }
 
 func (a *App) renderHeader() string {
@@ -1265,6 +1324,7 @@ func (a *App) renderHelpMenu() string {
 	}{
 		// Navigation
 		{"↑/↓ or k/j", "Navigate prompts", "Navigation"},
+		{"Tab", "Quick actions panel", ""},
 		{"/", "Search prompts", ""},
 		{"Space", "Select/deselect", ""},
 		{"Enter", "Copy to clipboard", ""},
@@ -1701,6 +1761,65 @@ func (a *App) openThemePreview() {
 	cfg, _ := config.Load()
 	a.themePreview = NewThemePreview(cfg.Theme.Name, a.width, a.height)
 	a.state = stateThemePreview
+}
+
+func (a *App) executeQuickAction(key string) tea.Cmd {
+	a.showQuickActions = false
+
+	switch key {
+	case "search":
+		a.state = stateSearch
+		a.search.Focus()
+		return textinput.Blink
+	case "add":
+		a.state = stateAdd
+		a.form = NewForm(nil)
+		return a.form.Init()
+	case "copy":
+		if p := a.selectedPrompt(); p != nil {
+			if err := clipboard.WriteAll(p.Content); err == nil {
+				ctx := context.Background()
+				a.db.IncrementUsage(ctx, p.ID)
+				a.showSuccess("Copied to clipboard!")
+			}
+		}
+		return tick()
+	case "edit":
+		if p := a.selectedPrompt(); p != nil {
+			a.state = stateEdit
+			a.form = NewForm(p)
+			return a.form.Init()
+		}
+	case "delete":
+		if a.selectedPrompt() != nil {
+			a.state = stateDeleteConfirm
+		}
+	case "preview":
+		if a.state == stateList {
+			a.state = stateDetail
+		} else {
+			a.state = stateList
+		}
+	case "stats":
+		if a.state == stateStats {
+			a.state = stateList
+		} else {
+			a.state = stateStats
+		}
+	case "stacks":
+		a.openStackTree()
+	case "refresh":
+		a.loading = true
+		return a.loadPrompts()
+	case "themes":
+		a.openThemePreview()
+	case "help":
+		a.state = stateHelpMenu
+	case "recent":
+		a.showRecent = !a.showRecent
+	}
+
+	return nil
 }
 
 func tick() tea.Cmd {
