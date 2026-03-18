@@ -123,6 +123,10 @@ type App struct {
 	// Quick actions panel
 	quickActions     *QuickActionsPanel
 	showQuickActions bool
+
+	// Mouse support
+	hoverIndex   int
+	mouseEnabled bool
 }
 
 type tickMsg time.Time
@@ -311,6 +315,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+
+	case tea.MouseMsg:
+		return a, a.handleMouse(msg)
 	}
 
 	// Update sub-components
@@ -788,6 +795,129 @@ func (a *App) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+func (a *App) handleMouse(msg tea.Msg) tea.Cmd {
+	m, ok := msg.(tea.MouseMsg)
+	if !ok {
+		return nil
+	}
+
+	// Ignore clicks outside of list state
+	if a.state != stateList && a.state != stateDetail {
+		return nil
+	}
+
+	listWidth := a.listWidth()
+	listStartX := 0
+	listEndX := listWidth
+	listStartY := 2 // After header
+	listEndY := a.contentHeight() + listStartY
+
+	// Check if mouse is within list bounds
+	inListBounds := m.X >= listStartX && m.X <= listEndX &&
+		m.Y >= listStartY && m.Y <= listEndY
+
+	// Check if mouse is within preview bounds
+	previewStartX := listWidth + 1
+	previewEndX := a.width
+	previewBounds := m.X >= previewStartX && m.X <= previewEndX &&
+		m.Y >= listStartY && m.Y <= listEndY
+
+	switch m.Type {
+	case tea.MouseLeft:
+		if inListBounds && a.state == stateList {
+			// Calculate which item was clicked
+			row := int(m.Y) - listStartY
+			maxVisible := a.contentHeight() - 2
+			if a.showRecent && a.search.Value() == "" {
+				maxVisible -= 6
+			}
+
+			start := 0
+			if a.cursor >= maxVisible {
+				start = a.cursor - maxVisible + 1
+			}
+
+			clickedIdx := start + row
+			if clickedIdx >= 0 && clickedIdx < len(a.filtered) {
+				a.cursor = clickedIdx
+				a.updatePreview()
+
+				// Double-click to copy (detect via rapid clicks)
+				if a.hoverIndex == clickedIdx {
+					// Simulate Enter key for copy
+					return func() tea.Msg {
+						return tea.KeyMsg{Type: tea.KeyEnter}
+					}
+				}
+			}
+			a.hoverIndex = clickedIdx
+		}
+
+		if previewBounds && a.state == stateList {
+			// Click on preview to expand
+			a.state = stateDetail
+		} else if inListBounds && a.state == stateDetail {
+			a.state = stateList
+		}
+
+	case tea.MouseRight:
+		if inListBounds && a.selectedPrompt() != nil {
+			a.state = stateDeleteConfirm
+		}
+
+	case tea.MouseWheelUp:
+		if a.state == stateDetail {
+			a.preview.YOffset--
+			if a.preview.YOffset < 0 {
+				a.preview.YOffset = 0
+			}
+		} else if inListBounds {
+			if a.cursor > 0 {
+				a.cursor--
+				a.updatePreview()
+			}
+		}
+
+	case tea.MouseWheelDown:
+		if a.state == stateDetail {
+			a.preview.YOffset++
+		} else if inListBounds {
+			if a.cursor < len(a.filtered)-1 {
+				a.cursor++
+				a.updatePreview()
+			}
+		}
+
+	case tea.MouseMotion:
+		if inListBounds {
+			row := int(m.Y) - listStartY
+			maxVisible := a.contentHeight() - 2
+			if a.showRecent && a.search.Value() == "" {
+				maxVisible -= 6
+			}
+
+			start := 0
+			if a.cursor >= maxVisible {
+				start = a.cursor - maxVisible + 1
+			}
+
+			hoveredIdx := start + row
+			if hoveredIdx >= 0 && hoveredIdx < len(a.filtered) {
+				if a.hoverIndex != hoveredIdx {
+					a.hoverIndex = hoveredIdx
+					// Auto-scroll if hovering past visible area
+					if hoveredIdx >= start+maxVisible {
+						a.cursor = hoveredIdx
+						a.updatePreview()
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 func (a *App) performBatchOperation() tea.Cmd {
 	ctx := context.Background()
 	processed := 0
@@ -1179,6 +1309,13 @@ func (a *App) renderListItem(p *model.Prompt, selected bool, index int, width in
 		score,
 	)
 
+	// Show hover indicator
+	isHovered := !selected && a.hoverIndex == index
+	if isHovered {
+		return itemStyle.Width(width - 2).
+			Foreground(colorMuted).
+			Render(line)
+	}
 	if selected {
 		return selectedItemStyle.Width(width - 2).Render(line)
 	}
@@ -1324,10 +1461,16 @@ func (a *App) renderHelpMenu() string {
 	}{
 		// Navigation
 		{"↑/↓ or k/j", "Navigate prompts", "Navigation"},
+		{"Click", "Select prompt", ""},
+		{"Double-click", "Copy to clipboard", ""},
 		{"Tab", "Quick actions panel", ""},
 		{"/", "Search prompts", ""},
 		{"Space", "Select/deselect", ""},
 		{"Enter", "Copy to clipboard", ""},
+
+		// Mouse
+		{"Scroll", "Navigate/scroll", "Mouse"},
+		{"Right-click", "Delete prompt", ""},
 
 		// Actions
 		{"a", "Add new prompt", "Actions"},
