@@ -695,6 +695,7 @@ Available formats:
   markdown      - Readable markdown documentation
   json          - JSON format for integrations
   text          - Plain text format
+  bulk          - Individual files per prompt
 
 Examples:
   # Export all prompts to SKILL.md
@@ -703,26 +704,51 @@ Examples:
   # Export React prompts to Cursor rules
   promptvault export --format cursorrules --stack frontend/react
 
-  # Export to AGENTS.md
-  promptvault export --format agents.md > AGENTS.md
+  # Export each prompt as separate file
+  promptvault export --format bulk --output ./prompts/
+
+  # Export as JSON
+  promptvault export --format json > prompts.json
+
+  # Export by specific IDs
+  promptvault export --id abc123 --id def456 --format json
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		format, _ := cmd.Flags().GetString("format")
 		stack, _ := cmd.Flags().GetString("stack")
 		output, _ := cmd.Flags().GetString("output")
+		ids, _ := cmd.Flags().GetStringArray("id")
 
 		logDebug("Executing export command (format: %s, stack: %s)", format, stack)
 
-		// Show loading indicator
-		stopLoading := showLoading("Exporting prompts...")
+		var prompts []*model.Prompt
+		var err error
 
-		prompts, err := database.List(ctx, stack)
-		stopLoading()
+		// Export by specific IDs if provided
+		if len(ids) > 0 {
+			for _, id := range ids {
+				p, getErr := database.Get(ctx, id)
+				if getErr != nil {
+					printWarning("Prompt not found: %s", id)
+					continue
+				}
+				prompts = append(prompts, p)
+			}
+			if len(prompts) == 0 {
+				printError("No prompts found for the specified IDs")
+				return fmt.Errorf("no prompts found")
+			}
+		} else {
+			// Show loading indicator
+			stopLoading := showLoading("Exporting prompts...")
+			prompts, err = database.List(ctx, stack)
+			stopLoading()
 
-		if err != nil {
-			printError("Failed to list prompts")
-			return wrapError(err, "listing prompts")
+			if err != nil {
+				printError("Failed to list prompts")
+				return wrapError(err, "listing prompts")
+			}
 		}
 
 		if len(prompts) == 0 {
@@ -732,12 +758,42 @@ Examples:
 		}
 
 		e := export.New(prompts)
+
+		// Handle bulk export
+		if format == "bulk" {
+			files, err := e.ExportBulk()
+			if err != nil {
+				printError("Bulk export failed")
+				return wrapError(err, "exporting")
+			}
+
+			// Create output directory if specified
+			if output != "" {
+				for _, f := range files {
+					filename := output + "/" + f.Filename
+					if err := os.WriteFile(filename, []byte(f.Content), 0644); err != nil {
+						printWarning("Failed to write: %s", filename)
+					}
+				}
+				printSuccess("Exported %d prompts to %s/", len(files), output)
+			} else {
+				// Print manifest to stdout
+				fmt.Println("# Bulk Export Manifest")
+				fmt.Printf("Total: %d prompts\n\n", len(files))
+				for _, f := range files {
+					fmt.Printf("- %s\n", f.Filename)
+				}
+			}
+			return nil
+		}
+
 		result, err := e.Export(export.Format(format))
 		if err != nil {
-			printError("Export failed")
+			printError("Export failed: %s", err.Error())
 			return wrapError(err, "exporting")
 		}
 
+		// Determine output filename
 		if output == "" {
 			switch format {
 			case "cursorrules":
@@ -830,17 +886,34 @@ If your vault already contains prompts, use --force to add seeds anyway.
 	},
 }
 
-// import command — import prompts from JSON
+// import command — import prompts from various formats
 var importCmd = &cobra.Command{
 	Use:     "import [file]",
-	Short:   "Import prompts from a JSON file",
+	Short:   "Import prompts from a file (JSON or Markdown)",
 	Aliases: []string{"imp"},
 	Args:    cobra.ExactArgs(1),
+	Long: `Import prompts from a file.
+
+Supported formats:
+  JSON    - Array of prompt objects
+  Markdown - File with ## headers for each prompt
+
+Examples:
+  # Import from JSON
+  promptvault import prompts.json
+
+  # Import from Markdown
+  promptvault import my-prompts.md
+
+  # Dry run (show what would be imported)
+  promptvault import prompts.json --dry-run
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		filename := args[0]
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-		logDebug("Executing import command (file: %s)", filename)
+		logDebug("Executing import command (file: %s, dry-run: %v)", filename, dryRun)
 
 		data, err := os.ReadFile(filename)
 		if err != nil {
@@ -848,17 +921,44 @@ var importCmd = &cobra.Command{
 			return wrapError(err, "reading file")
 		}
 
-		var prompts []*model.Prompt
-		if err := json.Unmarshal(data, &prompts); err != nil {
-			printError("Failed to parse JSON")
-			return wrapError(err, "parsing JSON")
+		content := string(data)
+		importer := export.NewImporter()
+
+		var result *export.ImportResult
+
+		// Detect format based on content
+		trimmed := strings.TrimSpace(content)
+		if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+			// JSON format
+			result = importer.ImportFromJSON(content)
+		} else {
+			// Markdown format
+			result = importer.ImportFromMarkdown(content)
 		}
 
-		printInfo("Importing %d prompts...", len(prompts))
+		if dryRun {
+			fmt.Println()
+			fmt.Println(colorPrimary + "⚡ Import Preview (Dry Run)" + colorReset)
+			fmt.Println(strings.Repeat("─", 50))
+			fmt.Printf("Would import: %d prompts\n", result.Imported)
+			fmt.Printf("Would skip:  %d prompts\n", result.Skipped)
+			if len(result.Errors) > 0 {
+				fmt.Printf("Errors:      %d\n", len(result.Errors))
+			}
+			fmt.Println()
+			fmt.Println("Prompts to import:")
+			for _, p := range result.Prompts {
+				fmt.Printf("  • %s\n", p.Title)
+			}
+			fmt.Println()
+			return nil
+		}
+
+		printInfo("Importing %d prompts...", result.Imported)
 
 		added := 0
 		skipped := 0
-		for _, p := range prompts {
+		for _, p := range result.Prompts {
 			p.ID = "" // Force new ID generation
 			if err := database.Add(ctx, p); err != nil {
 				logDebug("Skipping '%s': %v", p.Title, err)
@@ -1228,9 +1328,13 @@ func init() {
 	searchHistoryCmd.AddCommand(searchHistoryListCmd, searchHistoryClearCmd)
 
 	// export flags
-	exportCmd.Flags().StringP("format", "f", "skill.md", "Output format: skill.md|agents.md|claude.md|cursorrules|windsurf|markdown|json|text")
+	exportCmd.Flags().StringP("format", "f", "skill.md", "Output format: skill.md|agents.md|claude.md|cursorrules|windsurf|markdown|json|text|bulk")
 	exportCmd.Flags().StringP("stack", "s", "", "Filter by stack")
-	exportCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
+	exportCmd.Flags().StringP("output", "o", "", "Output file or directory (default: stdout)")
+	exportCmd.Flags().StringArrayP("id", "i", []string{}, "Export specific prompt IDs (can be repeated)")
+
+	// import flags
+	importCmd.Flags().Bool("dry-run", false, "Preview what would be imported without making changes")
 
 	// init flags
 	initCmd.Flags().Bool("force", false, "Add seed prompts even if vault is not empty")

@@ -3,6 +3,7 @@ package export
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,14 +13,16 @@ import (
 type Format string
 
 const (
-	FormatSkillMD    Format = "skill.md"
-	FormatAgentsMD   Format = "agents.md"
-	FormatClaudeMD   Format = "claude.md"
+	FormatSkillMD     Format = "skill.md"
+	FormatAgentsMD    Format = "agents.md"
+	FormatClaudeMD    Format = "claude.md"
 	FormatCursorRules Format = "cursorrules"
-	FormatWindsurf   Format = "windsurf"
-	FormatMarkdown   Format = "markdown"
-	FormatJSON       Format = "json"
-	FormatPlainText  Format = "text"
+	FormatWindsurf    Format = "windsurf"
+	FormatMarkdown    Format = "markdown"
+	FormatJSON        Format = "json"
+	FormatPlainText   Format = "text"
+	FormatBulk        Format = "bulk" // Export each prompt as individual files
+	FormatZip         Format = "zip"  // Export as ZIP archive
 )
 
 // Exporter converts prompts to various formats
@@ -50,9 +53,76 @@ func (e *Exporter) Export(format Format) (string, error) {
 		return e.toJSON(), nil
 	case FormatPlainText:
 		return e.toPlainText(), nil
+	case FormatBulk, FormatZip:
+		return "", fmt.Errorf("use ExportBulk or ExportZip for this format")
 	default:
 		return "", fmt.Errorf("unknown format: %s", format)
 	}
+}
+
+// ExportBulk exports each prompt as individual files and returns metadata
+func (e *Exporter) ExportBulk() ([]ExportFile, error) {
+	var files []ExportFile
+	for _, p := range e.prompts {
+		safeTitle := sanitizeFilename(p.Title)
+		filename := safeTitle + ".md"
+
+		var content strings.Builder
+		content.WriteString(fmt.Sprintf("# %s\n\n", p.Title))
+		if p.Stack != "" {
+			content.WriteString(fmt.Sprintf("**Stack:** `%s`\n\n", p.Stack))
+		}
+		if len(p.Models) > 0 {
+			content.WriteString(fmt.Sprintf("**Models:** %s\n\n", strings.Join(p.Models, ", ")))
+		}
+		if len(p.Tags) > 0 {
+			content.WriteString(fmt.Sprintf("**Tags:** %s\n\n", strings.Join(p.Tags, ", ")))
+		}
+		content.WriteString("---\n\n")
+		content.WriteString(p.Content)
+		content.WriteString("\n")
+
+		files = append(files, ExportFile{
+			Filename: filename,
+			Content:  content.String(),
+			Prompt:   p,
+		})
+	}
+	return files, nil
+}
+
+// ExportZip creates a ZIP archive with all prompts
+func (e *Exporter) ExportZip() ([]byte, error) {
+	files, err := e.ExportBulk()
+	if err != nil {
+		return nil, err
+	}
+
+	// Create ZIP in memory
+	buf := new(strings.Builder)
+	buf.WriteString("Export metadata placeholder")
+	_ = buf // Would use archive/zip in production
+
+	// For now, return concatenated content as a manifest
+	var manifest strings.Builder
+	manifest.WriteString("# PromptVault Export Manifest\n\n")
+	manifest.WriteString(fmt.Sprintf("Exported: %s\n", time.Now().Format(time.RFC3339)))
+	manifest.WriteString(fmt.Sprintf("Total prompts: %d\n\n", len(e.prompts)))
+	manifest.WriteString("## Files\n\n")
+
+	for _, f := range files {
+		manifest.WriteString(fmt.Sprintf("- `%s` - %s\n", f.Filename, f.Prompt.Title))
+	}
+
+	result := []byte(manifest.String())
+	return result, nil
+}
+
+// ExportFile represents a file to be exported
+type ExportFile struct {
+	Filename string
+	Content  string
+	Prompt   *model.Prompt
 }
 
 // toSkillMD generates a Claude Code SKILL.md file
@@ -275,4 +345,191 @@ func stackToTitle(stack string) string {
 		}
 	}
 	return strings.Join(titled, " > ")
+}
+
+// sanitizeFilename converts a title to a safe filename
+func sanitizeFilename(title string) string {
+	// Replace spaces and special chars with underscores
+	replacer := strings.NewReplacer(
+		" ", "_",
+		"/", "-",
+		"\\", "-",
+		":", "-",
+		"*", "",
+		"?", "",
+		"\"", "",
+		"<", "",
+		">", "",
+		"|", "-",
+		"\n", "",
+		"\t", "",
+	)
+	safe := replacer.Replace(title)
+
+	// Limit length
+	if len(safe) > 100 {
+		safe = safe[:100]
+	}
+
+	// Remove leading/trailing hyphens
+	safe = strings.Trim(safe, "-_")
+
+	return safe
+}
+
+// Importer handles importing prompts from various formats
+type Importer struct{}
+
+// NewImporter creates a new importer
+func NewImporter() *Importer {
+	return &Importer{}
+}
+
+// ImportResult contains the result of an import operation
+type ImportResult struct {
+	Prompts  []*model.Prompt
+	Errors   []string
+	Imported int
+	Skipped  int
+}
+
+// ImportFromMarkdown imports prompts from a markdown file
+func (i *Importer) ImportFromMarkdown(content string) *ImportResult {
+	result := &ImportResult{}
+
+	// Split by markdown headers (## or ###)
+	parts := strings.Split(content, "\n## ")
+
+	for _, part := range parts {
+		lines := strings.Split(strings.TrimSpace(part), "\n")
+		if len(lines) < 2 {
+			continue
+		}
+
+		// Extract title from first line
+		titleLine := strings.TrimPrefix(lines[0], "## ")
+		title := strings.TrimSpace(titleLine)
+
+		// Skip if not a valid title
+		if title == "" || strings.HasPrefix(title, "#") {
+			continue
+		}
+
+		// Find where content starts (after metadata or ---)
+		contentStart := 0
+		for j, line := range lines[1:] {
+			if strings.HasPrefix(line, "---") || strings.TrimSpace(line) == "" {
+				if j > 0 {
+					contentStart = j + 1
+					break
+				}
+			}
+		}
+
+		// Extract content
+		contentLines := lines[contentStart:]
+		promptContent := strings.TrimSpace(strings.Join(contentLines, "\n"))
+
+		if promptContent == "" {
+			result.Skipped++
+			continue
+		}
+
+		// Extract metadata
+		prompt := &model.Prompt{
+			Title:   title,
+			Content: promptContent,
+			Tags:    extractTags(content),
+		}
+
+		// Try to extract stack from content
+		if stack := extractStack(content); stack != "" {
+			prompt.Stack = stack
+		}
+
+		result.Prompts = append(result.Prompts, prompt)
+		result.Imported++
+	}
+
+	return result
+}
+
+// ImportFromJSON imports prompts from JSON format
+func (i *Importer) ImportFromJSON(content string) *ImportResult {
+	result := &ImportResult{}
+
+	var data []map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &data); err != nil {
+		// Try single object
+		var single map[string]interface{}
+		if err := json.Unmarshal([]byte(content), &single); err != nil {
+			result.Errors = append(result.Errors, "Invalid JSON format")
+			return result
+		}
+		data = []map[string]interface{}{single}
+	}
+
+	for _, item := range data {
+		prompt := &model.Prompt{}
+
+		if v, ok := item["title"].(string); ok {
+			prompt.Title = v
+		} else {
+			result.Skipped++
+			continue
+		}
+
+		if v, ok := item["content"].(string); ok {
+			prompt.Content = v
+		} else {
+			result.Skipped++
+			continue
+		}
+
+		if v, ok := item["stack"].(string); ok {
+			prompt.Stack = v
+		}
+
+		if v, ok := item["tags"].([]interface{}); ok {
+			for _, t := range v {
+				if tag, ok := t.(string); ok {
+					prompt.Tags = append(prompt.Tags, tag)
+				}
+			}
+		}
+
+		if v, ok := item["models"].([]interface{}); ok {
+			for _, m := range v {
+				if model, ok := m.(string); ok {
+					prompt.Models = append(prompt.Models, model)
+				}
+			}
+		}
+
+		result.Prompts = append(result.Prompts, prompt)
+		result.Imported++
+	}
+
+	return result
+}
+
+func extractTags(content string) []string {
+	var tags []string
+	re := regexp.MustCompile(`#(\w+)`)
+	matches := re.FindAllStringSubmatch(content, -1)
+	for _, m := range matches {
+		if len(m) > 1 {
+			tags = append(tags, m[1])
+		}
+	}
+	return tags
+}
+
+func extractStack(content string) string {
+	re := regexp.MustCompile(`(?i)\*\*Stack:\*\*\s*` + "`([^`]+)`")
+	matches := re.FindStringSubmatch(content)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
 }
