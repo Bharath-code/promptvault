@@ -13,14 +13,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/atotto/clipboard"
-	"github.com/spf13/cobra"
 	"github.com/Bharath-code/promptvault/internal/db"
 	"github.com/Bharath-code/promptvault/internal/export"
 	"github.com/Bharath-code/promptvault/internal/mcp"
 	"github.com/Bharath-code/promptvault/internal/model"
 	gistsync "github.com/Bharath-code/promptvault/internal/sync"
 	"github.com/Bharath-code/promptvault/internal/tui"
+	"github.com/atotto/clipboard"
+	"github.com/spf13/cobra"
 )
 
 var database *db.DB
@@ -32,14 +32,14 @@ const (
 
 // DX: Color codes for richer output
 var (
-	colorSuccess = "\033[38;5;2m"    // Green
-	colorError   = "\033[38;5;1m"    // Red
-	colorWarning = "\033[38;5;3m"    // Yellow
-	colorInfo    = "\033[38;5;6m"    // Cyan
-	colorPrimary = "\033[38;5;129m"  // Purple
-	colorMuted   = "\033[38;5;245m"  // Gray
+	colorSuccess = "\033[38;5;2m"   // Green
+	colorError   = "\033[38;5;1m"   // Red
+	colorWarning = "\033[38;5;3m"   // Yellow
+	colorInfo    = "\033[38;5;6m"   // Cyan
+	colorPrimary = "\033[38;5;129m" // Purple
+	colorMuted   = "\033[38;5;245m" // Gray
 	colorReset   = "\033[0m"
-	
+
 	// Icons
 	iconSuccess = "✓"
 	iconError   = "✗"
@@ -89,10 +89,10 @@ func suggestFix(err error) string {
 	if err == nil {
 		return ""
 	}
-	
+
 	errStr := err.Error()
 	var suggestions []string
-	
+
 	switch {
 	case strings.Contains(errStr, "title is required"):
 		suggestions = append(suggestions,
@@ -126,11 +126,11 @@ func suggestFix(err error) string {
 			"Or 'promptvault add' to create your first prompt",
 		)
 	}
-	
+
 	if len(suggestions) == 0 {
 		return ""
 	}
-	
+
 	var sb strings.Builder
 	sb.WriteString("\n")
 	sb.WriteString(colorInfo + "💡 Tips:" + colorReset + "\n")
@@ -140,7 +140,7 @@ func suggestFix(err error) string {
 		}
 		sb.WriteString(fmt.Sprintf("   %s %s\n", colorMuted+"•"+colorReset, s))
 	}
-	
+
 	return sb.String()
 }
 
@@ -149,12 +149,12 @@ func wrapError(err error, message string) error {
 	if err == nil {
 		return nil
 	}
-	
+
 	suggestion := suggestFix(err)
 	if suggestion != "" {
 		fmt.Fprint(os.Stderr, suggestion)
 	}
-	
+
 	return fmt.Errorf("%s: %w", message, err)
 }
 
@@ -174,12 +174,12 @@ func detectStackFromPath() string {
 		}
 		return "backend/node"
 	}
-	
+
 	// Check for go.mod (Go)
 	if _, err := os.Stat("go.mod"); err == nil {
 		return "backend/go"
 	}
-	
+
 	// Check for Python
 	if _, err := os.Stat("requirements.txt"); err == nil {
 		return "backend/python"
@@ -190,22 +190,22 @@ func detectStackFromPath() string {
 	if _, err := os.Stat("pyproject.toml"); err == nil {
 		return "backend/python"
 	}
-	
+
 	// Check for Terraform
 	if _, err := os.Stat("main.tf"); err == nil {
 		return "devops/terraform"
 	}
-	
+
 	// Check for Docker
 	if _, err := os.Stat("Dockerfile"); err == nil {
 		return "devops/docker"
 	}
-	
+
 	// Check for Kubernetes
 	if _, err := os.Stat("k8s"); err == nil {
 		return "devops/kubernetes"
 	}
-	
+
 	return ""
 }
 
@@ -286,6 +286,11 @@ Run without arguments to open the interactive TUI.`,
 	},
 }
 
+// search-history commands
+var searchHistoryCmd *cobra.Command
+var searchHistoryListCmd *cobra.Command
+var searchHistoryClearCmd *cobra.Command
+
 func init() {
 	// DX: Add verbose and debug flags
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
@@ -300,7 +305,7 @@ var addCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		logDebug("Executing add command")
-		
+
 		title, _ := cmd.Flags().GetString("title")
 		content, _ := cmd.Flags().GetString("content")
 		stack, _ := cmd.Flags().GetString("stack")
@@ -350,7 +355,7 @@ var addCmd = &cobra.Command{
 				tags = append(tags, t)
 			}
 		}
-		
+
 		// Add git branch as tag if in a repo
 		branch := getGitBranch()
 		if branch != "" && branch != "HEAD" {
@@ -380,7 +385,7 @@ var addCmd = &cobra.Command{
 			fmt.Println(colorPrimary + "┌" + strings.Repeat("─", 70) + "┐" + colorReset)
 			fmt.Println(colorPrimary + "│" + colorReset + centerText("📋 PREVIEW", 70) + colorPrimary + "│" + colorReset)
 			fmt.Println(colorPrimary + "├" + strings.Repeat("─", 70) + "┤" + colorReset)
-			
+
 			// Show content preview
 			lines := strings.Split(content, "\n")
 			maxLines := 12
@@ -395,10 +400,10 @@ var addCmd = &cobra.Command{
 				}
 				fmt.Println(colorPrimary + "│" + colorReset + "  " + line + strings.Repeat(" ", 68-len(line)) + colorPrimary + "│" + colorReset)
 			}
-			
+
 			fmt.Println(colorPrimary + "└" + strings.Repeat("─", 70) + "┘" + colorReset)
 			fmt.Println()
-			
+
 			// Show metadata
 			fmt.Printf("%s Title:%s   %s\n", colorMuted, colorReset, title)
 			if stack != "" {
@@ -411,7 +416,7 @@ var addCmd = &cobra.Command{
 				fmt.Printf("%s Models:%s  %s\n", colorMuted, colorReset, strings.Join(models, ", "))
 			}
 			fmt.Println()
-			
+
 			// Confirm
 			fmt.Printf("%s Add this prompt?%s [y/N]: ", colorInfo, colorReset)
 			var confirm string
@@ -438,7 +443,7 @@ var addCmd = &cobra.Command{
 		if len(tags) > 0 {
 			logInfo("Tags: %s", strings.Join(tags, ", "))
 		}
-		
+
 		return nil
 	},
 }
@@ -827,10 +832,10 @@ If your vault already contains prompts, use --force to add seeds anyway.
 
 // import command — import prompts from JSON
 var importCmd = &cobra.Command{
-	Use:   "import [file]",
-	Short: "Import prompts from a JSON file",
+	Use:     "import [file]",
+	Short:   "Import prompts from a JSON file",
 	Aliases: []string{"imp"},
-	Args:  cobra.ExactArgs(1),
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		filename := args[0]
@@ -1180,6 +1185,48 @@ func init() {
 	// delete flags
 	deleteCmd.Flags().BoolP("force", "f", false, "Skip confirmation")
 
+	// search-history command
+	searchHistoryCmd = &cobra.Command{
+		Use:   "history [subcommand]",
+		Short: "Manage search history",
+	}
+	searchHistoryListCmd = &cobra.Command{
+		Use:   "list",
+		Short: "Show search history",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			history, err := database.GetSearchHistory(ctx, 20)
+			if err != nil {
+				return wrapError(err, "getting search history")
+			}
+			if len(history) == 0 {
+				printInfo("No search history")
+				return nil
+			}
+			fmt.Println()
+			printSuccess("Search History:")
+			fmt.Println()
+			for i, q := range history {
+				fmt.Printf("  %2d. %s\n", i+1, q)
+			}
+			fmt.Println()
+			return nil
+		},
+	}
+	searchHistoryClearCmd = &cobra.Command{
+		Use:   "clear",
+		Short: "Clear all search history",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			if err := database.ClearSearchHistory(ctx); err != nil {
+				return wrapError(err, "clearing search history")
+			}
+			printSuccess("Search history cleared")
+			return nil
+		},
+	}
+	searchHistoryCmd.AddCommand(searchHistoryListCmd, searchHistoryClearCmd)
+
 	// export flags
 	exportCmd.Flags().StringP("format", "f", "skill.md", "Output format: skill.md|agents.md|claude.md|cursorrules|windsurf|markdown|json|text")
 	exportCmd.Flags().StringP("stack", "s", "", "Filter by stack")
@@ -1215,5 +1262,6 @@ func init() {
 		revertCmd,     // DX: Version revert
 		createCmd,     // DX: AI-assisted create
 		auditCmd,      // DX: Decay audit
+		searchHistoryCmd,
 	)
 }

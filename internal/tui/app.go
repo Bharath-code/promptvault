@@ -127,6 +127,10 @@ type App struct {
 	// Mouse support
 	hoverIndex   int
 	mouseEnabled bool
+
+	// Search history
+	searchHistory     *SearchHistory
+	showSearchHistory bool
 }
 
 type tickMsg time.Time
@@ -169,6 +173,10 @@ func (a *App) Init() tea.Cmd {
 		a.onboarding = NewOnboardingTour()
 		a.state = stateOnboarding
 	}
+
+	// Load search history
+	history, _ := a.db.GetSearchHistory(ctx, 20)
+	a.searchHistory = NewSearchHistory(history, 50, 15)
 
 	return tea.Batch(
 		tea.EnterAltScreen,
@@ -671,27 +679,93 @@ func (a *App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.state = stateList
 		a.search.SetValue("")
 		a.search.Blur()
+		a.showSearchHistory = false
 		a.applyFilter()
 		return a, nil
 
 	case "enter":
+		// Save search to history
+		query := strings.TrimSpace(a.search.Value())
+		if query != "" {
+			ctx := context.Background()
+			a.db.AddSearchHistory(ctx, query)
+			history, _ := a.db.GetSearchHistory(ctx, 20)
+			a.searchHistory.SetItems(history)
+		}
 		a.state = stateList
 		a.search.Blur()
+		a.showSearchHistory = false
 		return a, nil
 
-	case "up", "down":
-		// These shouldn't act as input but rather navigation
+	case "up", "k":
+		if a.showSearchHistory && a.searchHistory != nil {
+			a.searchHistory.MoveUp()
+			return a, nil
+		}
 		return a.handleListKey(msg)
+
+	case "down", "j":
+		if a.showSearchHistory && a.searchHistory != nil {
+			a.searchHistory.MoveDown()
+			return a, nil
+		}
+		return a.handleListKey(msg)
+
+	case "ctrl+u":
+		// Clear search input
+		a.search.SetValue("")
+		return a, nil
+
+	case "backspace":
+		// Hide history when typing
+		if a.showSearchHistory {
+			a.showSearchHistory = false
+		}
+		var cmd tea.Cmd
+		a.search, cmd = a.search.Update(msg)
+		a.loading = true
+		a.applyFilter()
+		a.cursor = 0
+		a.updatePreview()
+		a.loading = false
+		return a, cmd
+
+	case "d":
+		// Delete selected history item
+		if a.showSearchHistory && a.searchHistory != nil {
+			item := a.searchHistory.DeleteCurrent()
+			if item != "" {
+				ctx := context.Background()
+				a.db.DeleteSearchHistoryItem(ctx, item)
+			}
+			return a, nil
+		}
+
+	case "h":
+		// Toggle search history
+		if len(a.search.Value()) == 0 {
+			a.showSearchHistory = !a.showSearchHistory
+			return a, nil
+		}
 	}
 
-	var cmd tea.Cmd
-	a.search, cmd = a.search.Update(msg)
-	a.loading = true
-	a.applyFilter()
-	a.cursor = 0
-	a.updatePreview()
-	a.loading = false
-	return a, cmd
+	// Default: update search input
+	if msg.Type != tea.KeyUp && msg.Type != tea.KeyDown {
+		// Hide history when typing
+		if a.showSearchHistory {
+			a.showSearchHistory = false
+		}
+		var cmd tea.Cmd
+		a.search, cmd = a.search.Update(msg)
+		a.loading = true
+		a.applyFilter()
+		a.cursor = 0
+		a.updatePreview()
+		a.loading = false
+		return a, cmd
+	}
+
+	return a, nil
 }
 
 func (a *App) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -980,26 +1054,35 @@ func (a *App) renderMain() string {
 	statusBar := a.renderStatusBar()
 	toastBar := a.toastManager.Render(a.width)
 
+	// Add search history if showing
+	searchHistoryView := ""
+	if a.state == stateSearch && a.showSearchHistory && a.searchHistory != nil {
+		searchHistoryView = a.searchHistory.RenderInline()
+	}
+
+	mainContent := lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		body,
+		toastBar,
+		statusBar,
+	)
+
+	if searchHistoryView != "" {
+		return lipgloss.JoinHorizontal(lipgloss.Top,
+			mainContent,
+			searchHistoryView,
+		)
+	}
+
 	if a.showQuickActions {
 		actionsPanel := a.renderQuickActions()
-		mainContent := lipgloss.JoinVertical(lipgloss.Left,
-			header,
-			body,
-			toastBar,
-			statusBar,
-		)
 		return lipgloss.JoinHorizontal(lipgloss.Top,
 			mainContent,
 			actionsPanel,
 		)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		body,
-		toastBar,
-		statusBar,
-	)
+	return mainContent
 }
 
 func (a *App) renderQuickActions() string {
@@ -1028,6 +1111,12 @@ func (a *App) renderHeader() string {
 		searchBox = searchStyle.Render(a.search.View())
 	} else {
 		searchBox = helpStyle.Render("/ to search")
+	}
+
+	// Add history hint in search state
+	historyHint := ""
+	if a.state == stateSearch && len(a.search.Value()) == 0 {
+		historyHint = helpStyle.Render(" h for history")
 	}
 
 	left := lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", count)
@@ -1061,7 +1150,7 @@ func (a *App) renderHeader() string {
 		Render(lipgloss.JoinHorizontal(lipgloss.Center,
 			left,
 			gap,
-			searchBox,
+			lipgloss.JoinHorizontal(lipgloss.Center, searchBox, historyHint),
 		))
 
 	return header
@@ -1471,6 +1560,12 @@ func (a *App) renderHelpMenu() string {
 		// Mouse
 		{"Scroll", "Navigate/scroll", "Mouse"},
 		{"Right-click", "Delete prompt", ""},
+
+		// Search
+		{"h", "Show search history", "Search"},
+		{"↑/↓", "Navigate history", ""},
+		{"d", "Delete history item", ""},
+		{"Ctrl+U", "Clear search", ""},
 
 		// Actions
 		{"a", "Add new prompt", "Actions"},

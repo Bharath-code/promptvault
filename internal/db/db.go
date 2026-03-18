@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Bharath-code/promptvault/internal/model"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/Bharath-code/promptvault/internal/model"
 )
 
 // Maximum content length for prompts (100KB)
@@ -49,20 +49,20 @@ func OpenPath(dbPath string) (*DB, error) {
 	if dbPath == "" {
 		return nil, fmt.Errorf("database path cannot be empty")
 	}
-	
+
 	// Clean the path to resolve any .. or . components
 	dbPath = filepath.Clean(dbPath)
-	
+
 	// Ensure the path is absolute
 	if !filepath.IsAbs(dbPath) {
 		return nil, fmt.Errorf("database path must be absolute")
 	}
-	
+
 	// Ensure the path has .db extension for safety
 	if !strings.HasSuffix(dbPath, ".db") {
 		return nil, fmt.Errorf("database path must have .db extension")
 	}
-	
+
 	// Enable WAL mode, NORMAL sync (faster than FULL), and a large in-memory cache to speed up reads
 	dsn := dbPath + "?_journal_mode=WAL&_synchronous=NORMAL&_cache_size=100000&_busy_timeout=5000"
 	conn, err := sql.Open("sqlite3", dsn)
@@ -94,7 +94,7 @@ func validatePrompt(p *model.Prompt) error {
 	if p == nil {
 		return fmt.Errorf("prompt cannot be nil")
 	}
-	
+
 	title := strings.TrimSpace(p.Title)
 	if title == "" {
 		return fmt.Errorf("title is required")
@@ -102,7 +102,7 @@ func validatePrompt(p *model.Prompt) error {
 	if len(title) > maxTitleLength {
 		return fmt.Errorf("title exceeds maximum length of %d characters", maxTitleLength)
 	}
-	
+
 	content := strings.TrimSpace(p.Content)
 	if content == "" {
 		return fmt.Errorf("content is required")
@@ -110,11 +110,11 @@ func validatePrompt(p *model.Prompt) error {
 	if len(content) > maxContentLength {
 		return fmt.Errorf("content exceeds maximum length of %d bytes", maxContentLength)
 	}
-	
+
 	if p.Stack != "" && len(p.Stack) > 200 {
 		return fmt.Errorf("stack path exceeds maximum length of 200 characters")
 	}
-	
+
 	return nil
 }
 
@@ -195,6 +195,15 @@ func (d *DB) migrate() error {
 		INSERT INTO prompts_fts(id, title, content, stack, tags)
 		VALUES (new.id, new.title, new.content, new.stack, new.tags);
 	END;
+
+	CREATE TABLE IF NOT EXISTS search_history (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		query      TEXT NOT NULL UNIQUE,
+		count      INTEGER NOT NULL DEFAULT 1,
+		searched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_search_history_searched ON search_history(searched_at DESC);
 	`
 	_, err := d.conn.Exec(schema)
 	return err
@@ -206,10 +215,10 @@ func (d *DB) Add(ctx context.Context, p *model.Prompt) error {
 	if err := validatePrompt(p); err != nil {
 		return fmt.Errorf("invalid prompt: %w", err)
 	}
-	
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	if p.ID == "" {
 		p.ID = uuid.New().String()
 	}
@@ -294,16 +303,16 @@ func (d *DB) Update(ctx context.Context, p *model.Prompt, commitMsg, author stri
 	if err := validatePrompt(p); err != nil {
 		return fmt.Errorf("invalid prompt: %w", err)
 	}
-	
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	// Create version snapshot before updating
 	if err := d.createVersionInternal(ctx, p, commitMsg, author); err != nil {
 		// Don't fail the update if versioning fails
 		// logDebug("Failed to create version snapshot: %v", err)
 	}
-	
+
 	p.UpdatedAt = time.Now().UTC()
 	tags, _ := json.Marshal(p.Tags)
 	models, _ := json.Marshal(p.Models)
@@ -337,10 +346,10 @@ func (d *DB) createVersionInternal(ctx context.Context, prompt *model.Prompt, co
 	if err != nil {
 		return err
 	}
-	
+
 	tags, _ := json.Marshal(prompt.Tags)
 	models, _ := json.Marshal(prompt.Models)
-	
+
 	_, err = d.conn.ExecContext(ctx, `
 		INSERT INTO prompt_versions (id, prompt_id, version, title, content, tags, stack, models, verified, commit_msg, author, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -355,7 +364,7 @@ func (d *DB) createVersionInternal(ctx context.Context, prompt *model.Prompt, co
 func (d *DB) Delete(ctx context.Context, id string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	res, err := d.conn.ExecContext(ctx, `DELETE FROM prompts WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -371,7 +380,7 @@ func (d *DB) Delete(ctx context.Context, id string) error {
 func (d *DB) IncrementUsage(ctx context.Context, id string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	now := time.Now().UTC()
 	_, err := d.conn.ExecContext(ctx, `
 		UPDATE prompts SET usage_count = usage_count + 1, last_used_at = ? WHERE id = ?`,
@@ -401,7 +410,7 @@ func (d *DB) Count(ctx context.Context) (int, error) {
 func (d *DB) SaveTestResult(ctx context.Context, result *model.TestResult) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	_, err := d.conn.ExecContext(ctx, `
 		INSERT INTO test_results (id, prompt_id, model, input, expected_output, actual_output, passed, score, latency_ms, token_usage, error_message, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -433,18 +442,18 @@ func (d *DB) GetPromptTestSuite(ctx context.Context, promptID string) (*model.Te
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if len(results) == 0 {
 		return &model.TestSuite{
 			PromptID: promptID,
 			Tests:    []model.TestResult{},
 		}, nil
 	}
-	
+
 	passed := 0
 	totalScore := 0.0
 	testResults := make([]model.TestResult, len(results))
-	
+
 	for i, r := range results {
 		testResults[i] = *r
 		if r.Passed {
@@ -452,7 +461,7 @@ func (d *DB) GetPromptTestSuite(ctx context.Context, promptID string) (*model.Te
 		}
 		totalScore += r.Score
 	}
-	
+
 	return &model.TestSuite{
 		PromptID: promptID,
 		Tests:    testResults,
@@ -465,7 +474,7 @@ func (d *DB) GetPromptTestSuite(ctx context.Context, promptID string) (*model.Te
 func (d *DB) DeleteTestResults(ctx context.Context, promptID string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	_, err := d.conn.ExecContext(ctx, `DELETE FROM test_results WHERE prompt_id = ?`, promptID)
 	return err
 }
@@ -474,7 +483,7 @@ func (d *DB) DeleteTestResults(ctx context.Context, promptID string) error {
 func (d *DB) CreateVersion(ctx context.Context, prompt *model.Prompt, commitMsg, author string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	// Get current max version
 	var maxVersion int
 	err := d.conn.QueryRowContext(ctx, `
@@ -484,10 +493,10 @@ func (d *DB) CreateVersion(ctx context.Context, prompt *model.Prompt, commitMsg,
 	if err != nil {
 		return err
 	}
-	
+
 	tags, _ := json.Marshal(prompt.Tags)
 	models, _ := json.Marshal(prompt.Models)
-	
+
 	_, err = d.conn.ExecContext(ctx, `
 		INSERT INTO prompt_versions (id, prompt_id, version, title, content, tags, stack, models, verified, commit_msg, author, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -537,8 +546,75 @@ func (d *DB) GetCurrentVersion(ctx context.Context, promptID string) (int, error
 func (d *DB) DeletePromptVersions(ctx context.Context, promptID string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	_, err := d.conn.ExecContext(ctx, `DELETE FROM prompt_versions WHERE prompt_id = ?`, promptID)
+	return err
+}
+
+// AddSearchHistory adds or updates a search query in history
+func (d *DB) AddSearchHistory(ctx context.Context, query string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil
+	}
+
+	_, err := d.conn.ExecContext(ctx, `
+		INSERT INTO search_history (query, count, searched_at)
+		VALUES (?, 1, CURRENT_TIMESTAMP)
+		ON CONFLICT(query) DO UPDATE SET
+			count = count + 1,
+			searched_at = CURRENT_TIMESTAMP`,
+		query,
+	)
+	return err
+}
+
+// GetSearchHistory returns recent search queries
+func (d *DB) GetSearchHistory(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rows, err := d.conn.QueryContext(ctx, `
+		SELECT query FROM search_history
+		ORDER BY searched_at DESC
+		LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var history []string
+	for rows.Next() {
+		var query string
+		if err := rows.Scan(&query); err != nil {
+			return nil, err
+		}
+		history = append(history, query)
+	}
+	return history, rows.Err()
+}
+
+// ClearSearchHistory removes all search history
+func (d *DB) ClearSearchHistory(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	_, err := d.conn.ExecContext(ctx, `DELETE FROM search_history`)
+	return err
+}
+
+// DeleteSearchHistoryItem removes a specific search query from history
+func (d *DB) DeleteSearchHistoryItem(ctx context.Context, query string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	_, err := d.conn.ExecContext(ctx, `DELETE FROM search_history WHERE query = ?`, query)
 	return err
 }
 
