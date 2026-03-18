@@ -1,0 +1,47 @@
+# NPM package ignore file
+
+# Development files
+*.log
+*.tmp
+*.bak
+
+# Git
+.git
+.gitignore
+
+# Documentation (main repo has full docs)
+../docs/
+../CHANGELOG.md
+../CONTRIBUTING.md
+
+# Build artifacts
+../dist/
+*.go
+
+# CI/CD
+.github/
+../.github/
+
+# Go module files
+../go.mod
+../go.sum
+
+# Makefile
+../Makefile
+
+# Test files
+*_test.go
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# The binary itself (downloaded postinstall)
+promptvault
+promptvault.exe

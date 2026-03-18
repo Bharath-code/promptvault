@@ -1,0 +1,43 @@
+{
+  "name": "promptvault",
+  "version": "1.3.0",
+  "description": "The universal prompt OS for developers — store, search, and deploy AI prompts by tech stack",
+  "bin": {
+    "promptvault": "./bin/promptvault-cli.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "keywords": [
+    "prompt",
+    "ai",
+    "cli",
+    "developer-tools",
+    "llm",
+    "claude",
+    "chatgpt",
+    "productivity"
+  ],
+  "author": "Bharath",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bharath-code/promptvault"
+  },
+  "homepage": "https://github.com/Bharath-code/promptvault#readme",
+  "bugs": {
+    "url": "https://github.com/Bharath-code/promptvault/issues"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

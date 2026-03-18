@@ -20,6 +20,7 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm64
@@ -27,6 +28,8 @@ builds:
     # For now, build natively on macOS; use CI matrix for Linux
     ignore:
       - goos: linux
+        goarch: arm64
+      - goos: windows
         goarch: arm64
 
 archives:
@@ -39,6 +42,14 @@ archives:
     files:
       - README.md
       - LICENSE
+  
+  # Binary-only archives for NPM package
+  - id: binary
+    format: binary
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    builds:
+      - promptvault
+    allow_different_binary_count: true
 
 checksum:
   name_template: "checksums.txt"

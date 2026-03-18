@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Bharath-code/promptvault/internal/db"
+	"github.com/Bharath-code/promptvault/internal/model"
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -14,8 +16,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/Bharath-code/promptvault/internal/db"
-	"github.com/Bharath-code/promptvault/internal/model"
 )
 
 // viewState tracks which panel is active
@@ -30,27 +30,46 @@ const (
 	stateDeleteConfirm
 	stateCopied
 	stateFillVars
-	stateHelpMenu // Quick action menu
-	stateStats    // Statistics dashboard
+	stateHelpMenu
+	stateStats
+	stateCommandPalette
+	stateOnboarding
+	stateStackTree // NEW: Stack tree navigation
 )
+
+// Command represents a available command in palette
+type Command struct {
+	Name        string
+	Description string
+	Shortcut    string
+	Action      func(*App) (tea.Model, tea.Cmd)
+}
+
+// CommandPalette holds commands for fuzzy searching
+type CommandPalette struct {
+	search   textinput.Model
+	commands []Command
+	filtered []Command
+	cursor   int
+}
 
 // App is the root Bubble Tea model
 type App struct {
-	db       *db.DB
-	width    int
-	height   int
-	state    viewState
+	db        *db.DB
+	width     int
+	height    int
+	state     viewState
 	prevState viewState
 
 	// Data
-	prompts  []*model.Prompt
-	filtered []*model.Prompt
-	cursor   int
-	scores   []int // Fuzzy search scores
-	showRecent bool // Toggle recent prompts section
-	selected   map[int]bool // Multi-select indices
+	prompts     []*model.Prompt
+	filtered    []*model.Prompt
+	cursor      int
+	scores      []int           // Fuzzy search scores
+	showRecent  bool            // Toggle recent prompts section
+	selected    map[int]bool    // Multi-select indices
 	recentCache []*model.Prompt // Cached recent prompts
-	recentDirty bool // Cache invalidation flag
+	recentDirty bool            // Cache invalidation flag
 
 	// Sub-components
 	search        textinput.Model
@@ -62,8 +81,8 @@ type App struct {
 	lastWrapWidth   int
 
 	// Add/Edit form
-	form     *Form
-	varForm  *VarForm
+	form    *Form
+	varForm *VarForm
 
 	// Feedback
 	statusMsg   string
@@ -78,8 +97,21 @@ type App struct {
 	flashTime time.Time
 
 	// Loading state
-	spinner  spinner.Model
-	loading  bool
+	spinner spinner.Model
+	loading bool
+
+	// Command palette
+	commandPalette *CommandPalette
+
+	// Toast notifications
+	toastManager *ToastManager
+
+	// Onboarding tour
+	onboarding     *OnboardingTour
+	showOnboarding bool
+
+	// Stack tree navigation
+	stackTree *StackTree
 }
 
 type tickMsg time.Time
@@ -100,22 +132,76 @@ func New(database *db.DB) *App {
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
 	return &App{
-		db:      database,
-		search:  search,
-		preview: preview,
-		spinner: s,
-		selected: make(map[int]bool),
-		recentCache: nil,
-		recentDirty: true,
+		db:           database,
+		search:       search,
+		preview:      preview,
+		spinner:      s,
+		selected:     make(map[int]bool),
+		recentCache:  nil,
+		recentDirty:  true,
+		toastManager: &ToastManager{maxCount: 5},
 	}
 }
 
-// Init implements tea.Model
+// Init checks if first run and starts onboarding if needed
 func (a *App) Init() tea.Cmd {
+	ctx := context.Background()
+	count, _ := a.db.Count(ctx)
+	a.showOnboarding = count == 0
+
+	if a.showOnboarding {
+		a.onboarding = NewOnboardingTour()
+		a.state = stateOnboarding
+	}
+
 	return tea.Batch(
 		tea.EnterAltScreen,
 		a.loadPrompts(),
 	)
+}
+
+// NewCommandPalette creates a new command palette with available commands
+func NewCommandPalette() *CommandPalette {
+	search := textinput.New()
+	search.Placeholder = "Type a command..."
+	search.CharLimit = 50
+
+	commands := []Command{
+		{"Add Prompt", "Create a new prompt", "a", nil},
+		{"Edit Prompt", "Edit the selected prompt", "e", nil},
+		{"Delete Prompt", "Delete the selected prompt", "d", nil},
+		{"Search", "Search prompts by text", "/", nil},
+		{"Toggle Preview", "Toggle full-screen preview", "v", nil},
+		{"Refresh", "Reload prompts from database", "r", nil},
+		{"Toggle Recent", "Show/hide recently used prompts", "R", nil},
+		{"Statistics", "View usage statistics", "s", nil},
+		{"Help", "Show keyboard shortcuts", "?", nil},
+		{"Quit", "Exit PromptVault", "q", nil},
+	}
+
+	return &CommandPalette{
+		search:   search,
+		commands: commands,
+		filtered: commands,
+	}
+}
+
+// filterCommands filters commands by search query
+func (cp *CommandPalette) filterCommands(query string) {
+	if query == "" {
+		cp.filtered = cp.commands
+		return
+	}
+
+	query = strings.ToLower(query)
+	var filtered []Command
+	for _, cmd := range cp.commands {
+		if strings.Contains(strings.ToLower(cmd.Name), query) ||
+			strings.Contains(strings.ToLower(cmd.Description), query) {
+			filtered = append(filtered, cmd)
+		}
+	}
+	cp.filtered = filtered
 }
 
 // loadPrompts fetches prompts from the db
@@ -161,8 +247,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.preview.Width = a.previewWidth()
 		a.preview.Height = a.contentHeight()
 		// Calculate safe width for search box avoiding overflow: 20 is min, cap it to 40 max or percentage
-		sw := a.width/3
-		if sw < 20 { sw = 20 }
+		sw := a.width / 3
+		if sw < 20 {
+			sw = 20
+		}
 		a.search.Width = sw
 		a.updatePreview()
 
@@ -188,7 +276,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tickMsg:
-		// Clear status after 2 seconds
 		if !a.statusTimer.IsZero() && time.Since(a.statusTimer) > 2*time.Second {
 			a.statusMsg = ""
 			a.statusTimer = time.Time{}
@@ -197,7 +284,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.flashMsg = ""
 			a.flashTime = time.Time{}
 		}
-		if !a.statusTimer.IsZero() || !a.flashTime.IsZero() {
+		a.toastManager.RemoveExpired()
+		if !a.statusTimer.IsZero() || !a.flashTime.IsZero() || a.toastManager.IsActive() {
 			cmds = append(cmds, tick())
 		}
 		return a, tea.Batch(cmds...)
@@ -234,13 +322,91 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// If in help menu or stats, any key closes it except special keys
-	if a.state == stateHelpMenu || a.state == stateStats {
+	// Handle states that close on any key press
+	if a.state == stateHelpMenu || a.state == stateStats || a.state == stateCommandPalette {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return a, tea.Quit
 		default:
 			a.state = stateList
+			return a, nil
+		}
+	}
+
+	// Onboarding tour keyboard handling
+	if a.state == stateOnboarding {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return a, tea.Quit
+		case "esc":
+			a.state = stateList
+			a.onboarding = nil
+			return a, nil
+		case "enter", " ":
+			if a.onboarding.IsLast() {
+				a.state = stateList
+				a.onboarding = nil
+				if a.showOnboarding {
+					a.showSuccess("Press a to add your first prompt!")
+				}
+				return a, nil
+			}
+			a.onboarding.Next()
+			return a, nil
+		case "left", "h":
+			a.onboarding.Previous()
+			return a, nil
+		case "right", "l":
+			if !a.onboarding.IsLast() {
+				a.onboarding.Next()
+			}
+			return a, nil
+		}
+	}
+
+	// Stack tree keyboard handling
+	if a.state == stateStackTree {
+		switch msg.String() {
+		case "esc":
+			a.state = stateList
+			a.stackTree = nil
+			return a, nil
+		case "q", "ctrl+c":
+			return a, tea.Quit
+		case "up", "k":
+			if a.stackTree != nil {
+				a.stackTree.MoveUp()
+			}
+			return a, nil
+		case "down", "j":
+			if a.stackTree != nil {
+				a.stackTree.MoveDown()
+			}
+			return a, nil
+		case "left", "h":
+			if a.stackTree != nil {
+				a.stackTree.Collapse()
+			}
+			return a, nil
+		case "right", "l":
+			if a.stackTree != nil {
+				a.stackTree.Expand()
+			}
+			return a, nil
+		case "enter":
+			if a.stackTree != nil && a.stackTree.IsSelectable() {
+				node := a.stackTree.Current()
+				a.stackFilter = node.Path
+				a.state = stateList
+				a.stackTree = nil
+				a.loading = true
+				return a, a.loadPrompts()
+			}
+			return a, nil
+		case " ":
+			if a.stackTree != nil {
+				a.stackTree.ToggleExpand()
+			}
 			return a, nil
 		}
 	}
@@ -296,7 +462,6 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, textinput.Blink
 
 	case "enter":
-		// Check for variables and fill if present
 		if p := a.selectedPrompt(); p != nil {
 			vars := ExtractVars(p.Content)
 			if len(vars) > 0 {
@@ -305,23 +470,20 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return a, a.varForm.Init()
 			}
 
-			// Copy prompt directly to clipboard
 			if err := clipboard.WriteAll(p.Content); err == nil {
 				ctx := context.Background()
 				if incErr := a.db.IncrementUsage(ctx, p.ID); incErr != nil {
-					// Log but don't fail on usage increment error
-					a.setStatus("Copied (usage tracking failed)", true)
+					a.showWarning("Copied (usage tracking failed)")
 				} else {
-					a.flashMsg = "✓ Copied to clipboard!"
-					a.flashTime = time.Now()
+					a.showSuccess("Copied to clipboard!")
 				}
 				return a, tick()
 			} else {
-				a.setStatus("Failed to copy: "+err.Error(), true)
+				a.showError("Failed to copy: " + err.Error())
 				return a, tick()
 			}
 		}
-		
+
 	case " ":
 		// Space for multi-select toggle
 		if p := a.selectedPrompt(); p != nil {
@@ -350,7 +512,7 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.selectedPrompt() != nil {
 			a.state = stateDeleteConfirm
 		}
-		
+
 	case "x":
 		// Batch operations
 		if len(a.selected) > 0 {
@@ -385,8 +547,18 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case ":":
+		a.state = stateCommandPalette
+		a.commandPalette = NewCommandPalette()
+		a.commandPalette.search.Focus()
+		return a, textinput.Blink
+
+	case "t":
+		// Open stack tree navigation
+		a.openStackTree()
+		return a, nil
+
 	case "?":
-		// Toggle help menu
 		if a.state == stateHelpMenu {
 			a.state = stateList
 		} else {
@@ -452,21 +624,20 @@ func (a *App) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.state == stateAdd {
 			err = a.db.Add(ctx, p)
 			if err == nil {
-				a.setStatus("✓ Prompt added!", false)
+				a.showSuccess("Prompt added!")
 			}
 		} else {
-			// Get username for author
 			author := os.Getenv("USER")
 			if author == "" {
 				author = "anonymous"
 			}
 			err = a.db.Update(ctx, p, "Edited in TUI", author)
 			if err == nil {
-				a.setStatus("✓ Prompt updated!", false)
+				a.showSuccess("Prompt updated!")
 			}
 		}
 		if err != nil {
-			a.setStatus("Error: "+err.Error(), true)
+			a.showError("Error: " + err.Error())
 			a.loading = true
 			return a, tea.Batch(cmd, a.loadPrompts(), tick())
 		}
@@ -493,11 +664,9 @@ func (a *App) handleVarFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := clipboard.WriteAll(res.Content); err == nil {
 			if p := a.selectedPrompt(); p != nil {
 				if incErr := a.db.IncrementUsage(ctx, p.ID); incErr != nil {
-					// Log but don't fail on usage increment error
-					a.setStatus("Copied (usage tracking failed)", true)
+					a.showWarning("Copied (usage tracking failed)")
 				} else {
-					a.flashMsg = "✓ Filled & Copied to clipboard!"
-					a.flashTime = time.Now()
+					a.showSuccess("Filled & Copied to clipboard!")
 				}
 			} else {
 				a.flashMsg = "✓ Filled & Copied to clipboard!"
@@ -523,7 +692,7 @@ func (a *App) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ctx := context.Background()
 		if p := a.selectedPrompt(); p != nil {
 			if err := a.db.Delete(ctx, p.ID); err == nil {
-				a.setStatus("Prompt deleted", false)
+				a.showSuccess("Prompt deleted")
 				if a.cursor > 0 {
 					a.cursor--
 				}
@@ -542,21 +711,19 @@ func (a *App) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) performBatchOperation() tea.Cmd {
-	// Batch process selected prompts
 	ctx := context.Background()
 	processed := 0
-	
+
 	for idx := range a.selected {
 		if idx < len(a.filtered) {
 			p := a.filtered[idx]
-			// Increment usage as a simple batch operation
 			_ = a.db.IncrementUsage(ctx, p.ID)
 			processed++
 		}
 	}
-	
-	a.setStatus(fmt.Sprintf("Processed %d prompts", processed), false)
-	a.selected = make(map[int]bool) // Clear selection
+
+	a.showSuccess(fmt.Sprintf("Processed %d prompts", processed))
+	a.selected = make(map[int]bool)
 	return tick()
 }
 
@@ -586,6 +753,12 @@ func (a *App) View() string {
 		return a.renderHelpMenu()
 	case stateStats:
 		return a.renderStats()
+	case stateCommandPalette:
+		return a.renderCommandPalette()
+	case stateOnboarding:
+		return a.renderOnboarding()
+	case stateStackTree:
+		return a.renderStackTree()
 	}
 
 	return a.renderMain()
@@ -595,10 +768,12 @@ func (a *App) renderMain() string {
 	header := a.renderHeader()
 	body := a.renderBody()
 	statusBar := a.renderStatusBar()
+	toastBar := a.toastManager.Render(a.width)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		body,
+		toastBar,
 		statusBar,
 	)
 }
@@ -620,21 +795,21 @@ func (a *App) renderHeader() string {
 	}
 
 	left := lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", count)
-	
+
 	// Ensure searchBox doesn't push layout offscreen. Give priority to searchBox.
 	actualLeftWidth := lipgloss.Width(left)
 	actualSearchWidth := lipgloss.Width(searchBox)
-	
+
 	// If the terminal is incredibly narrow, hide the left side completely
-	if actualLeftWidth + actualSearchWidth + 4 > a.width {
+	if actualLeftWidth+actualSearchWidth+4 > a.width {
 		left = title
 		actualLeftWidth = lipgloss.Width(left)
-		if actualLeftWidth + actualSearchWidth + 4 > a.width {
+		if actualLeftWidth+actualSearchWidth+4 > a.width {
 			left = "" // hide title to make room for search box
 			actualLeftWidth = 0
 		}
 	}
-	
+
 	gapW := a.width - actualLeftWidth - actualSearchWidth - 4
 	if gapW < 0 {
 		gapW = 0
@@ -661,7 +836,7 @@ func (a *App) renderBody() string {
 	if a.state == stateDetail {
 		return a.renderFullScreenPreview()
 	}
-	
+
 	listWidth := a.listWidth()
 	previewWidth := a.previewWidth()
 	height := a.contentHeight()
@@ -710,7 +885,7 @@ func (a *App) renderFullScreenPreview() string {
 	content := a.preview.View()
 
 	// Footer with instructions
-	footer := helpStyle.Render("v close  •  ↑/↓ scroll  •  ENTER copy  •  / search")
+	footer := helpStyle.Render("v close  •  ↑/↓ scroll  •  Enter copy  •  t stacks")
 
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -751,7 +926,7 @@ func (a *App) renderList(width, height int) string {
 	if a.showRecent && a.search.Value() == "" {
 		maxVisible -= 6 // Reserve space for recent section
 	}
-	
+
 	start := 0
 	if a.cursor >= maxVisible {
 		start = a.cursor - maxVisible + 1
@@ -785,7 +960,7 @@ func (a *App) renderRecentPrompts(width int) string {
 		// Build recent section from cache
 		var lines []string
 		lines = append(lines, panelHeaderStyle.Render(" 🔥 Recently Used"))
-		
+
 		for _, p := range a.recentCache {
 			title := p.Title
 			if len(title) > 50 {
@@ -793,23 +968,23 @@ func (a *App) renderRecentPrompts(width int) string {
 			}
 			lines = append(lines, fmt.Sprintf("  • %-45s %dx", title, p.UsageCount))
 		}
-		
+
 		return lipgloss.NewStyle().Render(strings.Join(lines, "\n"))
 	}
-	
+
 	// Calculate recent prompts (expensive - only do when cache is dirty)
 	type recentPrompt struct {
 		prompt *model.Prompt
 		score  int
 	}
 	var recents []recentPrompt
-	
+
 	for _, p := range a.prompts {
 		if p.UsageCount > 0 {
 			recents = append(recents, recentPrompt{p, p.UsageCount})
 		}
 	}
-	
+
 	// Sort by usage count (descending)
 	for i := 0; i < len(recents)-1; i++ {
 		for j := i + 1; j < len(recents); j++ {
@@ -818,27 +993,27 @@ func (a *App) renderRecentPrompts(width int) string {
 			}
 		}
 	}
-	
+
 	// Take top 5 and cache
 	if len(recents) > 5 {
 		recents = recents[:5]
 	}
-	
+
 	// Update cache
 	a.recentCache = make([]*model.Prompt, len(recents))
 	for i, rp := range recents {
 		a.recentCache[i] = rp.prompt
 	}
 	a.recentDirty = false
-	
+
 	if len(recents) == 0 {
 		return ""
 	}
-	
+
 	// Build recent section
 	var lines []string
 	lines = append(lines, panelHeaderStyle.Render(" 🔥 Recently Used"))
-	
+
 	for _, rp := range recents {
 		p := rp.prompt
 		title := p.Title
@@ -847,7 +1022,7 @@ func (a *App) renderRecentPrompts(width int) string {
 		}
 		lines = append(lines, fmt.Sprintf("  • %-45s %dx", title, p.UsageCount))
 	}
-	
+
 	return lipgloss.NewStyle().Render(strings.Join(lines, "\n"))
 }
 
@@ -928,7 +1103,7 @@ func (a *App) renderPreviewPane(width, height int) string {
 
 	contentStyle := lipgloss.NewStyle().
 		Foreground(colorText).
-		Width(width - 4).
+		Width(width-4).
 		Margin(1, 0)
 
 	tags := ""
@@ -936,7 +1111,7 @@ func (a *App) renderPreviewPane(width, height int) string {
 		tags += tagStyle.Render("#"+t) + " "
 	}
 
-	footer := helpStyle.Render("ENTER copy  •  v expand  •  e edit  •  d delete")
+	footer := helpStyle.Render("Enter copy  •  v expand  •  t stacks  •  e edit  •  d delete")
 
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -955,7 +1130,7 @@ func (a *App) renderPreview(width, height int) string {
 		return ""
 	}
 
-	header := panelHeaderStyle.Width(width-4).Render("▶ " + p.Title)
+	header := panelHeaderStyle.Width(width - 4).Render("▶ " + p.Title)
 
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -977,7 +1152,7 @@ func (a *App) renderStatusBar() string {
 		left = statusBarStyle.Render("PromptVault")
 	}
 
-	keys := statusBarMutedStyle.Render("a add  •  e edit  •  d del  •  / search  •  ? help  •  q quit")
+	keys := statusBarMutedStyle.Render("a add  •  e edit  •  t stacks  •  / search  •  ? help  •  q quit")
 
 	gap := lipgloss.NewStyle().
 		Background(colorBgAlt).
@@ -1037,8 +1212,8 @@ func (a *App) renderDeleteConfirm() string {
 
 func (a *App) renderHelpMenu() string {
 	helpItems := []struct {
-		key   string
-		desc  string
+		key     string
+		desc    string
 		section string
 	}{
 		// Navigation
@@ -1046,22 +1221,23 @@ func (a *App) renderHelpMenu() string {
 		{"/", "Search prompts", ""},
 		{"Space", "Select/deselect", ""},
 		{"Enter", "Copy to clipboard", ""},
-		
+
 		// Actions
 		{"a", "Add new prompt", "Actions"},
 		{"e", "Edit selected", ""},
 		{"d", "Delete selected", ""},
 		{"v", "Toggle preview", ""},
-		
+
 		// Quick Actions
 		{"c", "Copy selected", "Quick Actions"},
 		{"r", "Refresh list", ""},
 		{"R", "Toggle recent", ""},
 		{"s", "Show stats", ""},
 		{"x", "Batch process", ""},
-		
+		{"t", "Stack tree", ""},
+
 		// Other
-		{"?", "This help menu", "Other"},
+		{":", "Command palette", "Other"},
 		{"Esc", "Go back / Clear search", ""},
 		{"q", "Quit", ""},
 		{"Ctrl+C", "Exit", ""},
@@ -1080,8 +1256,8 @@ func (a *App) renderHelpMenu() string {
 			currentSection = item.section
 			items = append(items, panelHeaderStyle.Render(" "+currentSection))
 		}
-		items = append(items, fmt.Sprintf("  %-16s %s", 
-			tagStyle.Render(item.key), 
+		items = append(items, fmt.Sprintf("  %-16s %s",
+			tagStyle.Render(item.key),
 			item.desc))
 	}
 
@@ -1119,14 +1295,14 @@ func (a *App) renderStats() string {
 	total := len(a.prompts)
 	totalUsage := 0
 	stackCounts := make(map[string]int)
-	
+
 	for _, p := range a.prompts {
 		totalUsage += p.UsageCount
 		if p.Stack != "" {
 			stackCounts[p.Stack]++
 		}
 	}
-	
+
 	// Get top stacks
 	type stackCount struct {
 		stack string
@@ -1148,7 +1324,7 @@ func (a *App) renderStats() string {
 	if len(stacks) > 5 {
 		stacks = stacks[:5]
 	}
-	
+
 	// Get most used prompts
 	type promptUsage struct {
 		title string
@@ -1172,7 +1348,7 @@ func (a *App) renderStats() string {
 	if len(usage) > 5 {
 		usage = usage[:5]
 	}
-	
+
 	// Build stats display
 	var lines []string
 	lines = append(lines, panelHeaderStyle.Render(" 📊 PromptVault Statistics"))
@@ -1180,7 +1356,7 @@ func (a *App) renderStats() string {
 	lines = append(lines, fmt.Sprintf("  %-20s  %d", "Total Prompts:", total))
 	lines = append(lines, fmt.Sprintf("  %-20s  %d", "Total Usage:", totalUsage))
 	lines = append(lines, "")
-	
+
 	// Top stacks
 	lines = append(lines, panelHeaderStyle.Render(" Top Stacks"))
 	for i, s := range stacks {
@@ -1195,7 +1371,7 @@ func (a *App) renderStats() string {
 		lines = append(lines, fmt.Sprintf("  %s %-25s %d", medal, s.stack, s.count))
 	}
 	lines = append(lines, "")
-	
+
 	// Most used
 	lines = append(lines, panelHeaderStyle.Render(" Most Used Prompts"))
 	for i, u := range usage {
@@ -1209,9 +1385,9 @@ func (a *App) renderStats() string {
 		}
 		lines = append(lines, fmt.Sprintf("  %s %-30s %dx", medal, u.title, u.count))
 	}
-	
+
 	content := strings.Join(lines, "\n")
-	
+
 	msg := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorPrimary).
@@ -1229,7 +1405,7 @@ func (a *App) renderStats() string {
 func (a *App) renderLoading() string {
 	// Show loading overlay with spinner
 	spinnerView := a.spinner.View() + " Loading prompts..."
-	
+
 	msg := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorPrimary).
@@ -1239,6 +1415,63 @@ func (a *App) renderLoading() string {
 			"",
 			helpStyle.Render("Please wait..."),
 		))
+
+	return lipgloss.NewStyle().
+		Width(a.width).
+		Height(a.height).
+		Align(lipgloss.Center, lipgloss.Center).
+		Render(msg)
+}
+
+func (a *App) renderCommandPalette() string {
+	if a.commandPalette == nil {
+		return ""
+	}
+
+	paletteWidth := 60
+	paletteHeight := 15
+
+	var items []string
+	items = append(items, panelHeaderStyle.Render(" Command Palette"))
+
+	searchView := a.commandPalette.search.View()
+	items = append(items, searchView)
+	items = append(items, "")
+
+	maxItems := paletteHeight - 6
+	for i := 0; i < maxItems && i < len(a.commandPalette.filtered); i++ {
+		cmd := a.commandPalette.filtered[i]
+		shortcut := tagStyle.Render(cmd.Shortcut)
+		if i == a.commandPalette.cursor {
+			item := lipgloss.JoinHorizontal(lipgloss.Center,
+				selectedItemStyle.Render("> "),
+				lipgloss.NewStyle().Foreground(colorText).Render(cmd.Name),
+				lipgloss.NewStyle().Width(paletteWidth-25).Render(""),
+				shortcut,
+			)
+			items = append(items, item)
+		} else {
+			item := lipgloss.JoinHorizontal(lipgloss.Center,
+				lipgloss.NewStyle().Width(2).Render(" "),
+				lipgloss.NewStyle().Foreground(colorMuted).Render(cmd.Name),
+				lipgloss.NewStyle().Width(paletteWidth-25).Render(""),
+				lipgloss.NewStyle().Foreground(colorMuted).Render(cmd.Shortcut),
+			)
+			items = append(items, item)
+		}
+	}
+
+	items = append(items, "")
+	items = append(items, helpStyle.Render("↑/↓ navigate  •  Enter execute  •  Esc close"))
+
+	content := strings.Join(items, "\n")
+
+	msg := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorAccent).
+		Padding(1, 2).
+		Width(paletteWidth).
+		Render(content)
 
 	return lipgloss.NewStyle().
 		Width(a.width).
@@ -1278,18 +1511,15 @@ func (a *App) updatePreview() {
 		return
 	}
 
-	// ULTRA FAST PATH: Plain text only, no markdown rendering on navigation
-	// This is CRITICAL for performance - glamour rendering is VERY expensive
 	lines := strings.Split(p.Content, "\n")
 	paneText := p.Content
 	if len(lines) > 15 {
-		paneText = strings.Join(lines[:15], "\n") + "\n\n..."
+		paneText = strings.Join(lines[:15], "\n") + "\n..."
 	}
-	
-	// Add simple formatting without glamour
-	a.cachedPreview = paneText
 
-	// Create the full text for viewport (plain text, no markdown)
+	highlightedText := HighlightPromptContent(paneText, 15)
+	a.cachedPreview = highlightedText
+
 	meta := ""
 	if p.Stack != "" {
 		meta += stackStyle.Render(p.Stack) + "  "
@@ -1304,7 +1534,7 @@ func (a *App) updatePreview() {
 	fullContent := lipgloss.JoinVertical(lipgloss.Left,
 		meta,
 		"",
-		paneText,
+		highlightedText,
 		"",
 		usageStyle.Render(fmt.Sprintf("Used %d times", p.UsageCount)),
 	)
@@ -1322,6 +1552,27 @@ func (a *App) setStatus(msg string, isErr bool) {
 	a.statusTimer = time.Now()
 }
 
+// Toast notification helpers
+func (a *App) showToast(msg string, toastType ToastType) {
+	a.toastManager.Add(msg, toastType, 3*time.Second)
+}
+
+func (a *App) showSuccess(msg string) {
+	a.showToast(msg, ToastSuccess)
+}
+
+func (a *App) showError(msg string) {
+	a.showToast(msg, ToastError)
+}
+
+func (a *App) showWarning(msg string) {
+	a.showToast(msg, ToastWarning)
+}
+
+func (a *App) showInfo(msg string) {
+	a.showToast(msg, ToastInfo)
+}
+
 func (a *App) listWidth() int {
 	return a.width / 2
 }
@@ -1332,6 +1583,53 @@ func (a *App) previewWidth() int {
 
 func (a *App) contentHeight() int {
 	return a.height - 4 // header + status bar
+}
+
+func (a *App) renderOnboarding() string {
+	if a.onboarding == nil {
+		return a.renderMain()
+	}
+	return a.onboarding.Render(a.width, a.height)
+}
+
+func (a *App) renderStackTree() string {
+	if a.stackTree == nil {
+		return a.renderMain()
+	}
+
+	var stacks []string
+	stackCounts := make(map[string]int)
+
+	for _, p := range a.prompts {
+		if p.Stack != "" {
+			stacks = append(stacks, p.Stack)
+			stackCounts[p.Stack] = 1
+		}
+	}
+
+	a.stackTree = NewStackTree(stacks, 40)
+	a.stackTree.UpdateCounts(stackCounts)
+
+	content := a.stackTree.Render()
+
+	return lipgloss.Place(a.width, a.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#7C3AED")).
+			Padding(1, 2).
+			Render(content))
+}
+
+func (a *App) openStackTree() {
+	var stacks []string
+	for _, p := range a.prompts {
+		if p.Stack != "" {
+			stacks = append(stacks, p.Stack)
+		}
+	}
+	a.stackTree = NewStackTree(stacks, 40)
+	a.state = stateStackTree
 }
 
 func tick() tea.Cmd {

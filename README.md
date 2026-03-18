@@ -67,6 +67,11 @@ PromptVault fixes this. It's a CLI + TUI that keeps every prompt you've ever wri
 
 ## Install
 
+**NPM (Recommended for Node.js developers):**
+```sh
+npm install -g promptvault
+```
+
 **Go install:**
 ```sh
 go install github.com/Bharath-code/promptvault@latest
@@ -78,6 +83,9 @@ git clone https://github.com/Bharath-code/promptvault
 cd promptvault
 make build
 ```
+
+**Manual Download:**
+Download pre-built binaries from [GitHub Releases](https://github.com/Bharath-code/promptvault/releases)
 
 ---
 
