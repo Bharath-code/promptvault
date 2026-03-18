@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -79,10 +79,6 @@ type App struct {
 	preview       viewport.Model
 	cachedPreview string
 
-	// Renderer cache
-	glamourRenderer *glamour.TermRenderer
-	lastWrapWidth   int
-
 	// Add/Edit form
 	form    *Form
 	varForm *VarForm
@@ -131,6 +127,9 @@ type App struct {
 	// Search history
 	searchHistory     *SearchHistory
 	showSearchHistory bool
+
+	// Vim mode
+	vimMode *VimModeHandler
 }
 
 type tickMsg time.Time
@@ -177,6 +176,9 @@ func (a *App) Init() tea.Cmd {
 	// Load search history
 	history, _ := a.db.GetSearchHistory(ctx, 20)
 	a.searchHistory = NewSearchHistory(history, 50, 15)
+
+	// Initialize vim mode
+	a.vimMode = NewVimModeHandler()
 
 	return tea.Batch(
 		tea.EnterAltScreen,
@@ -349,6 +351,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle Ctrl+C globally
+	if msg.Type == tea.KeyCtrlC {
+		return a, tea.Quit
+	}
+
+	// Vim mode handling
+	if a.vimMode != nil && a.vimMode.Enabled {
+		return a.handleVimKey(msg)
+	}
+
 	// Handle states that close on any key press
 	if a.state == stateHelpMenu || a.state == stateStats || a.state == stateCommandPalette {
 		switch msg.String() {
@@ -869,6 +881,323 @@ func (a *App) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+func (a *App) handleVimKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch a.vimMode.Mode {
+	case VimNormal:
+		return a.handleVimNormal(msg)
+	case VimInsert:
+		return a.handleVimInsert(msg)
+	case VimCommand:
+		return a.handleVimCommand(msg)
+	case VimVisual:
+		return a.handleVimVisual(msg)
+	}
+	return a, nil
+}
+
+func (a *App) handleVimNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return a, tea.Quit
+
+	case "i":
+		a.vimMode.EnterInsert()
+		return a, nil
+
+	case "a":
+		a.vimMode.EnterInsert()
+		// Move cursor right if possible
+		if a.cursor < len(a.filtered)-1 {
+			a.cursor++
+			a.updatePreview()
+		}
+		return a, nil
+
+	case "A":
+		a.vimMode.EnterInsert()
+		// Move to end
+		return a, nil
+
+	case "o":
+		a.vimMode.EnterInsert()
+		a.state = stateAdd
+		a.form = NewForm(nil)
+		return a, a.form.Init()
+
+	case "O":
+		a.vimMode.EnterInsert()
+		a.state = stateAdd
+		a.form = NewForm(nil)
+		return a, a.form.Init()
+
+	case "h", "left":
+		// Same as left arrow
+		return a.handleListKey(msg)
+
+	case "j", "down":
+		// Same as down arrow
+		return a.handleListKey(msg)
+
+	case "k", "up":
+		// Same as up arrow
+		return a.handleListKey(msg)
+
+	case "l", "right":
+		// Same as right arrow
+		return a.handleListKey(msg)
+
+	case "g", "G":
+		// Go to top/bottom
+		if msg.String() == "g" {
+			a.cursor = 0
+		} else {
+			a.cursor = len(a.filtered) - 1
+		}
+		a.updatePreview()
+		return a, nil
+
+	case "/":
+		// Search
+		a.state = stateSearch
+		a.search.Focus()
+		return a, textinput.Blink
+
+	case ":":
+		// Command mode
+		a.vimMode.EnterCommand()
+		return a, nil
+
+	case "v":
+		// Visual mode for selection
+		a.vimMode.EnterVisual()
+		return a, nil
+
+	case "V":
+		// Visual line mode
+		a.vimMode.EnterVisual()
+		return a, nil
+
+	case "y":
+		// Yank (copy) - handled specially
+		if p := a.selectedPrompt(); p != nil {
+			clipboard.WriteAll(p.Content)
+			a.showSuccess("Yanked to register")
+		}
+		return a, nil
+
+	case "yy":
+		// Yank entire line
+		if p := a.selectedPrompt(); p != nil {
+			clipboard.WriteAll(p.Content)
+			a.showSuccess("Yanked to register")
+		}
+		return a, nil
+
+	case "p":
+		// Put (paste) - paste content
+		return a.handleListKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	case "dd":
+		// Delete line
+		if a.selectedPrompt() != nil {
+			a.state = stateDeleteConfirm
+		}
+		return a, nil
+
+	case "d", "delete":
+		if a.selectedPrompt() != nil {
+			a.state = stateDeleteConfirm
+		}
+		return a, nil
+
+	case "e":
+		// Edit
+		if p := a.selectedPrompt(); p != nil {
+			a.state = stateEdit
+			a.form = NewForm(p)
+			return a, a.form.Init()
+		}
+		return a, nil
+
+	case "r":
+		// Refresh
+		a.loading = true
+		return a, a.loadPrompts()
+
+	case "R":
+		// Toggle recent
+		a.showRecent = !a.showRecent
+		return a, nil
+
+	case "s":
+		// Stats
+		if a.state == stateStats {
+			a.state = stateList
+		} else {
+			a.state = stateStats
+		}
+		return a, nil
+
+	case "t":
+		// Stack tree
+		a.openStackTree()
+		return a, nil
+
+	case "?":
+		// Help
+		a.state = stateHelpMenu
+		return a, nil
+
+	case "0":
+		// Go to top
+		a.cursor = 0
+		a.updatePreview()
+		return a, nil
+
+	case "$":
+		// Go to bottom
+		a.cursor = len(a.filtered) - 1
+		a.updatePreview()
+		return a, nil
+
+	case " ":
+		// Space for multi-select
+		return a.handleListKey(msg)
+
+	case "enter":
+		// Copy to clipboard
+		return a.handleListKey(msg)
+
+	case "tab":
+		a.showQuickActions = !a.showQuickActions
+		return a, nil
+
+	case "esc":
+		// Go back
+		if a.state == stateStats || a.state == stateHelpMenu {
+			a.state = stateList
+			return a, nil
+		}
+		if a.stackFilter != "" {
+			a.stackFilter = ""
+			a.loading = true
+			return a, a.loadPrompts()
+		}
+		return a, nil
+
+	// Number counts for motions
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		// Store for potential count prefix (simplified)
+		return a, nil
+
+	default:
+		return a.handleListKey(msg)
+	}
+}
+
+func (a *App) handleVimInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		a.vimMode.EnterNormal()
+		return a, nil
+
+	case tea.KeyCtrlC:
+		return a, tea.Quit
+
+	case tea.KeyCtrlO:
+		// Execute one normal mode command
+		a.vimMode.EnterNormal()
+		return a, nil
+
+	default:
+		// Pass through to normal key handling
+		return a.handleKey(msg)
+	}
+}
+
+func (a *App) handleVimCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		a.vimMode.EnterNormal()
+		a.vimMode.CommandBuffer = ""
+		return a, nil
+
+	case tea.KeyEnter:
+		cmd := a.vimMode.CommandBuffer
+		a.vimMode.AddCommandHistory(cmd)
+
+		quit := executeVimCommand(a, cmd)
+		a.vimMode.EnterNormal()
+		a.vimMode.CommandBuffer = ""
+
+		if quit {
+			return a, tea.Quit
+		}
+		return a, nil
+
+	case tea.KeyBackspace:
+		if len(a.vimMode.CommandBuffer) > 0 {
+			a.vimMode.CommandBuffer = a.vimMode.CommandBuffer[:len(a.vimMode.CommandBuffer)-1]
+		} else {
+			a.vimMode.EnterNormal()
+		}
+		return a, nil
+
+	case tea.KeyUp:
+		// Command history up
+		a.vimMode.CommandBuffer = a.vimMode.HistoryUp()
+		return a, nil
+
+	case tea.KeyDown:
+		// Command history down
+		a.vimMode.CommandBuffer = a.vimMode.HistoryDown()
+		return a, nil
+
+	case tea.KeyTab:
+		// Tab completion (future enhancement)
+		return a, nil
+
+	default:
+		if len(msg.String()) == 1 {
+			a.vimMode.CommandBuffer += msg.String()
+		}
+		return a, nil
+	}
+}
+
+func (a *App) handleVimVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "v":
+		a.vimMode.EnterNormal()
+		return a, nil
+
+	case "y":
+		// Yank selection
+		if p := a.selectedPrompt(); p != nil {
+			clipboard.WriteAll(p.Content)
+			a.showSuccess("Yanked selection")
+		}
+		a.vimMode.EnterNormal()
+		return a, nil
+
+	case "d":
+		// Delete selection
+		if a.selectedPrompt() != nil {
+			a.state = stateDeleteConfirm
+		}
+		a.vimMode.EnterNormal()
+		return a, nil
+
+	case "p":
+		// Put/paste
+		return a.handleListKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	default:
+		// Movement commands stay in visual mode
+		return a.handleVimNormal(msg)
+	}
+}
+
 func (a *App) handleMouse(msg tea.Msg) tea.Cmd {
 	m, ok := msg.(tea.MouseMsg)
 	if !ok {
@@ -1280,67 +1609,47 @@ func (a *App) renderList(width, height int) string {
 }
 
 func (a *App) renderRecentPrompts(width int) string {
-	// Use cached recent prompts if available
-	if !a.recentDirty && a.recentCache != nil && len(a.recentCache) > 0 {
-		// Build recent section from cache
-		var lines []string
-		lines = append(lines, panelHeaderStyle.Render(" 🔥 Recently Used"))
-
-		for _, p := range a.recentCache {
-			title := p.Title
-			if len(title) > 50 {
-				title = title[:47] + "..."
-			}
-			lines = append(lines, fmt.Sprintf("  • %-45s %dx", title, p.UsageCount))
+	// Calculate recent prompts if cache is dirty
+	if a.recentDirty || a.recentCache == nil || len(a.recentCache) == 0 {
+		type recentPrompt struct {
+			prompt *model.Prompt
+			score  int
 		}
+		var recents []recentPrompt
 
-		return lipgloss.NewStyle().Render(strings.Join(lines, "\n"))
-	}
-
-	// Calculate recent prompts (expensive - only do when cache is dirty)
-	type recentPrompt struct {
-		prompt *model.Prompt
-		score  int
-	}
-	var recents []recentPrompt
-
-	for _, p := range a.prompts {
-		if p.UsageCount > 0 {
-			recents = append(recents, recentPrompt{p, p.UsageCount})
-		}
-	}
-
-	// Sort by usage count (descending)
-	for i := 0; i < len(recents)-1; i++ {
-		for j := i + 1; j < len(recents); j++ {
-			if recents[j].score > recents[i].score {
-				recents[i], recents[j] = recents[j], recents[i]
+		for _, p := range a.prompts {
+			if p.UsageCount > 0 {
+				recents = append(recents, recentPrompt{p, p.UsageCount})
 			}
 		}
+
+		// Sort by usage count (descending)
+		sort.Slice(recents, func(i, j int) bool {
+			return recents[i].score > recents[j].score
+		})
+
+		// Take top 5 and cache
+		if len(recents) > 5 {
+			recents = recents[:5]
+		}
+
+		// Update cache
+		a.recentCache = make([]*model.Prompt, len(recents))
+		for i, rp := range recents {
+			a.recentCache[i] = rp.prompt
+		}
+		a.recentDirty = false
+
+		if len(recents) == 0 {
+			return ""
+		}
 	}
 
-	// Take top 5 and cache
-	if len(recents) > 5 {
-		recents = recents[:5]
-	}
-
-	// Update cache
-	a.recentCache = make([]*model.Prompt, len(recents))
-	for i, rp := range recents {
-		a.recentCache[i] = rp.prompt
-	}
-	a.recentDirty = false
-
-	if len(recents) == 0 {
-		return ""
-	}
-
-	// Build recent section
+	// Build recent section from cache
 	var lines []string
 	lines = append(lines, panelHeaderStyle.Render(" 🔥 Recently Used"))
 
-	for _, rp := range recents {
-		p := rp.prompt
+	for _, p := range a.recentCache {
 		title := p.Title
 		if len(title) > 50 {
 			title = title[:47] + "..."
@@ -1659,13 +1968,9 @@ func (a *App) renderStats() string {
 		stacks = append(stacks, stackCount{s, c})
 	}
 	// Sort by count
-	for i := 0; i < len(stacks)-1; i++ {
-		for j := i + 1; j < len(stacks); j++ {
-			if stacks[j].count > stacks[i].count {
-				stacks[i], stacks[j] = stacks[j], stacks[i]
-			}
-		}
-	}
+	sort.Slice(stacks, func(i, j int) bool {
+		return stacks[i].count > stacks[j].count
+	})
 	// Take top 5
 	if len(stacks) > 5 {
 		stacks = stacks[:5]
@@ -1683,13 +1988,9 @@ func (a *App) renderStats() string {
 		}
 	}
 	// Sort by usage
-	for i := 0; i < len(usage)-1; i++ {
-		for j := i + 1; j < len(usage); j++ {
-			if usage[j].count > usage[i].count {
-				usage[i], usage[j] = usage[j], usage[i]
-			}
-		}
-	}
+	sort.Slice(usage, func(i, j int) bool {
+		return usage[i].count > usage[j].count
+	})
 	// Take top 5
 	if len(usage) > 5 {
 		usage = usage[:5]

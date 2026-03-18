@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 
@@ -137,13 +138,9 @@ func FuzzySearch(query string, prompts []*model.Prompt) ([]*model.Prompt, []int)
 	}
 
 	// Sort by score (descending)
-	for i := 0; i < len(scored)-1; i++ {
-		for j := i + 1; j < len(scored); j++ {
-			if scored[j].score > scored[i].score {
-				scored[i], scored[j] = scored[j], scored[i]
-			}
-		}
-	}
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
 
 	// Extract sorted prompts and scores
 	result := make([]*model.Prompt, len(scored))

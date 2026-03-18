@@ -769,6 +769,10 @@ Examples:
 
 			// Create output directory if specified
 			if output != "" {
+				if err := os.MkdirAll(output, 0755); err != nil {
+					printError("Failed to create directory: %s", output)
+					return wrapError(err, "creating directory")
+				}
 				for _, f := range files {
 					filename := output + "/" + f.Filename
 					if err := os.WriteFile(filename, []byte(f.Content), 0644); err != nil {
