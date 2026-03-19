@@ -57,13 +57,13 @@ func (tp *ThemePreview) Render() string {
 
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(color("#7C3AED")).
 		PaddingBottom(1)
 
 	lines = append(lines, headerStyle.Render("🎨 Theme Selector"))
 	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748B")).
+		Foreground(color("#64748B")).
 		Render("Current: "+tp.selected))
 	lines = append(lines, "")
 
@@ -83,16 +83,16 @@ func (tp *ThemePreview) Render() string {
 		if selected {
 			line = lipgloss.JoinHorizontal(lipgloss.Center,
 				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#7C3AED")).
+					Foreground(color("#7C3AED")).
 					Bold(true).
 					Render("►"),
 				lipgloss.NewStyle().
-					Background(lipgloss.Color("#334155")).
-					Foreground(lipgloss.Color("#E2E8F0")).
+					Background(color("#334155")).
+					Foreground(color("#E2E8F0")).
 					Padding(0, 1).
 					Render(themeName),
 				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#64748B")).
+					Foreground(color("#64748B")).
 					Width(8).
 					Render(""),
 				lipgloss.NewStyle().
@@ -101,19 +101,19 @@ func (tp *ThemePreview) Render() string {
 		} else {
 			line = lipgloss.JoinHorizontal(lipgloss.Center,
 				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#334155")).
+					Foreground(color("#334155")).
 					Width(2).
 					Render(""),
 				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#94A3B8")).
+					Foreground(color("#94A3B8")).
 					Width(12).
 					Render(themeName),
 				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#64748B")).
+					Foreground(color("#64748B")).
 					Width(8).
 					Render(""),
 				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#475569")).
+					Foreground(color("#475569")).
 					Render(preview),
 			)
 		}
@@ -123,13 +123,13 @@ func (tp *ThemePreview) Render() string {
 
 	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748B")).
+		Foreground(color("#64748B")).
 		Italic(true).
 		Render("↑/↓ navigate  •  Enter select  •  Esc cancel"))
 
 	content := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(color("#7C3AED")).
 		Padding(1, 2).
 		Width(70).
 		Render(strings.Join(lines, "\n"))
@@ -179,18 +179,18 @@ func (ke *KeybindingEditor) Render() string {
 
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(color("#7C3AED")).
 		PaddingBottom(1)
 
 	lines = append(lines, headerStyle.Render("⌨️  Keybindings"))
 	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748B")).
+		Foreground(color("#64748B")).
 		Render("↑/↓ navigate  •  Esc done"))
 
 	content := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(color("#7C3AED")).
 		Padding(1, 2).
 		Width(ke.width).
 		Render(strings.Join(lines, "\n"))

@@ -8,14 +8,14 @@ import (
 )
 
 var (
-	highlightColor = lipgloss.Color("#A78BFA") // Purple - keywords
-	stringColor    = lipgloss.Color("#34D399") // Green - strings
-	commentColor   = lipgloss.Color("#64748B") // Gray - comments
-	numberColor    = lipgloss.Color("#F59E0B") // Amber - numbers
-	typeColor      = lipgloss.Color("#06B6D4") // Cyan - types
-	functionColor  = lipgloss.Color("#3B82F6") // Blue - functions
-	operatorColor  = lipgloss.Color("#EF4444") // Red - operators
-	variableColor  = lipgloss.Color("#F97316") // Orange - variables
+	highlightColor = color("#A78BFA") // Purple - keywords
+	stringColor    = color("#34D399") // Green - strings
+	commentColor   = color("#64748B") // Gray - comments
+	numberColor    = color("#F59E0B") // Amber - numbers
+	typeColor      = color("#06B6D4") // Cyan - types
+	functionColor  = color("#3B82F6") // Blue - functions
+	operatorColor  = color("#EF4444") // Red - operators
+	variableColor  = color("#F97316") // Orange - variables
 )
 
 type SyntaxRule struct {
@@ -92,13 +92,13 @@ func HighlightMarkdownContent(content string) string {
 			if inCodeBlock {
 				// End code block
 				result = append(result, lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#475569")).
+					Foreground(color("#475569")).
 					Render(line))
 				inCodeBlock = false
 			} else {
 				// Start code block
 				result = append(result, lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#475569")).
+					Foreground(color("#475569")).
 					Render(line))
 				inCodeBlock = true
 			}
@@ -136,8 +136,8 @@ func highlightMarkdownLine(line string) string {
 	result = regexp.MustCompile("`([^`]+)`").
 		ReplaceAllStringFunc(result, func(match string) string {
 			return lipgloss.NewStyle().
-				Background(lipgloss.Color("#1E293B")).
-				Foreground(lipgloss.Color("#A78BFA")).
+				Background(color("#1E293B")).
+				Foreground(color("#A78BFA")).
 				Render(match)
 		})
 
@@ -151,21 +151,21 @@ func highlightMarkdownLine(line string) string {
 				break
 			}
 		}
-		colors := []string{"#7C3AED", "#8B5CF6", "#A78BFA", "#C4B5FD"}
+		syntaxColors := []lipgloss.Color{color("#7C3AED"), color("#8B5CF6"), color("#A78BFA"), color("#C4B5FD")}
 		colorIdx := level - 1
-		if colorIdx >= len(colors) {
-			colorIdx = len(colors) - 1
+		if colorIdx >= len(syntaxColors) {
+			colorIdx = len(syntaxColors) - 1
 		}
 		return lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color(colors[colorIdx])).
+			Foreground(syntaxColors[colorIdx]).
 			Render(line)
 	}
 
 	// List items - and numbered lists
 	if matched, _ := regexp.MatchString(`^(\s*)([-*+]|\d+\.)\s`, line); matched {
 		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#06B6D4")).
+			Foreground(color("#06B6D4")).
 			Render(line)
 	}
 
@@ -174,7 +174,7 @@ func highlightMarkdownLine(line string) string {
 		ReplaceAllStringFunc(result, func(match string) string {
 			return lipgloss.NewStyle().
 				Underline(true).
-				Foreground(lipgloss.Color("#3B82F6")).
+				Foreground(color("#3B82F6")).
 				Render(match)
 		})
 

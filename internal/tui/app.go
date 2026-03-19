@@ -77,11 +77,16 @@ type App struct {
 	// Sub-components
 	search        textinput.Model
 	preview       viewport.Model
+	spinner       spinner.Model
+	form          *Form
+	varForm       *VarForm
+	quickActions  *QuickActionsPanel
+	stackTree     *StackTree
+	onboarding    *OnboardingTour
+	toastManager  *ToastManager
+	searchHistory *SearchHistory
+	help          *HelpOverlay
 	cachedPreview string
-
-	// Add/Edit form
-	form    *Form
-	varForm *VarForm
 
 	// Feedback
 	statusMsg   string
@@ -96,28 +101,19 @@ type App struct {
 	flashTime time.Time
 
 	// Loading state
-	spinner spinner.Model
 	loading bool
 
 	// Command palette
 	commandPalette *CommandPalette
 
-	// Toast notifications
-	toastManager *ToastManager
-
 	// Onboarding tour
-	onboarding     *OnboardingTour
 	showOnboarding bool
-
-	// Stack tree navigation
-	stackTree *StackTree
 
 	// Config view
 	themePreview *ThemePreview
 	configTab    int
 
 	// Quick actions panel
-	quickActions     *QuickActionsPanel
 	showQuickActions bool
 
 	// Mouse support
@@ -125,7 +121,6 @@ type App struct {
 	mouseEnabled bool
 
 	// Search history
-	searchHistory     *SearchHistory
 	showSearchHistory bool
 
 	// Vim mode
@@ -272,6 +267,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.preview.Width = a.previewWidth()
 		a.preview.Height = a.contentHeight()
+		// Re-initialize help overlay with new dimensions
+		kb := config.DefaultConfig.Keybindings
+		a.help = NewHelpOverlay(a.width, a.height, a.state, a.vimMode, kb)
 		// Calculate safe width for search box avoiding overflow: 20 is min, cap it to 40 max or percentage
 		sw := a.width / 3
 		if sw < 20 {
@@ -1361,7 +1359,9 @@ func (a *App) View() string {
 			return a.varForm.View(a.width, a.height)
 		}
 	case stateHelpMenu:
-		return a.renderHelpMenu()
+		kb := config.DefaultConfig.Keybindings
+		a.help = NewHelpOverlay(a.width, a.height, a.state, a.vimMode, kb)
+		return a.help.View()
 	case stateStats:
 		return a.renderStats()
 	case stateCommandPalette:
@@ -2263,7 +2263,7 @@ func (a *App) renderStackTree() string {
 		lipgloss.Center, lipgloss.Center,
 		lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#7C3AED")).
+			BorderForeground(color("#7C3AED")).
 			Padding(1, 2).
 			Render(content))
 }
@@ -2291,7 +2291,7 @@ func (a *App) renderThemePreview() string {
 		lipgloss.Center, lipgloss.Center,
 		lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#7C3AED")).
+			BorderForeground(color("#7C3AED")).
 			Padding(1, 2).
 			Render(content))
 }

@@ -106,7 +106,7 @@ func (tm *ToastManager) Render(width int) string {
 	}
 
 	result := lipgloss.NewStyle().
-		Background(lipgloss.Color("#1E293B")).
+		Background(color("#1E293B")).
 		Padding(1, 2).
 		Width(width).
 		Render(strings.Join(lines, "\n"))
@@ -117,13 +117,13 @@ func (tm *ToastManager) Render(width int) string {
 func (tm *ToastManager) getStyle(toastType ToastType) lipgloss.Style {
 	switch toastType {
 	case ToastSuccess:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
+		return lipgloss.NewStyle().Foreground(color("#10B981"))
 	case ToastError:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+		return lipgloss.NewStyle().Foreground(color("#EF4444"))
 	case ToastWarning:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+		return lipgloss.NewStyle().Foreground(color("#F59E0B"))
 	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6"))
+		return lipgloss.NewStyle().Foreground(color("#3B82F6"))
 	}
 }
 

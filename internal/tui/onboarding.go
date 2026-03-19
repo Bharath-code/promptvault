@@ -131,29 +131,29 @@ func (ot *OnboardingTour) Render(width, height int) string {
 
 	progress := ot.Progress()
 	progressStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748B")).
+		Foreground(color("#64748B")).
 		Align(lipgloss.Right)
 
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(color("#7C3AED")).
 		PaddingBottom(1)
 
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#94A3B8")).
+		Foreground(color("#94A3B8")).
 		Width(width - 20)
 
 	shortcutStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#06B6D4")).
-		Background(lipgloss.Color("#164E63")).
+		Foreground(color("#06B6D4")).
+		Background(color("#164E63")).
 		Padding(0, 1).
 		Bold(true)
 
 	navigationStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748B"))
+		Foreground(color("#64748B"))
 
 	skipStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#475569")).
+		Foreground(color("#475569")).
 		Italic(true)
 
 	dots := ot.renderProgressDots()
@@ -162,7 +162,7 @@ func (ot *OnboardingTour) Render(width, height int) string {
 		lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Center,
 			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7C3AED")).
+				Foreground(color("#7C3AED")).
 				Bold(true).
 				Render("⚡ Welcome to PromptVault"),
 			progressStyle.Width(20).Render(progress),
@@ -211,11 +211,11 @@ func (ot *OnboardingTour) Render(width, height int) string {
 
 	container := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
-		BorderBackground(lipgloss.Color("#1E293B")).
+		BorderForeground(color("#7C3AED")).
+		BorderBackground(color("#1E293B")).
 		Padding(2, 4).
 		Width(60).
-		Background(lipgloss.Color("#0F172A"))
+		Background(color("#0F172A"))
 
 	box := container.Render(content)
 
@@ -231,16 +231,16 @@ func (ot *OnboardingTour) renderProgressDots() string {
 	for i := 0; i < ot.totalSteps; i++ {
 		if i == ot.currentStep {
 			dots = append(dots, lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7C3AED")).
+				Foreground(color("#7C3AED")).
 				Bold(true).
 				Render("●"))
 		} else if i < ot.currentStep {
 			dots = append(dots, lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7C3AED")).
+				Foreground(color("#7C3AED")).
 				Render("●"))
 		} else {
 			dots = append(dots, lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#334155")).
+				Foreground(color("#334155")).
 				Render("○"))
 		}
 	}

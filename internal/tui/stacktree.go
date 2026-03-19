@@ -18,16 +18,16 @@ type TreeNode struct {
 
 var (
 	treeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#64748B"))
+			Foreground(color("#64748B"))
 
 	treeSelectedStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#334155")).
-				Foreground(lipgloss.Color("#E2E8F0")).
+				Background(color("#334155")).
+				Foreground(color("#E2E8F0")).
 				Bold(true)
 
-	stackIconStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#7C3AED"))
-	countBadgeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
-	expandIconStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
+	stackIconStyle  = lipgloss.NewStyle().Foreground(color("#7C3AED"))
+	countBadgeStyle = lipgloss.NewStyle().Foreground(color("#64748B"))
+	expandIconStyle = lipgloss.NewStyle().Foreground(color("#64748B"))
 )
 
 type StackTree struct {
@@ -162,7 +162,7 @@ func (st *StackTree) Render() string {
 	// Header
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(color("#7C3AED")).
 		PaddingBottom(1)
 
 	lines = append(lines, headerStyle.Render("📁 Stack Browser"))
@@ -176,7 +176,7 @@ func (st *StackTree) Render() string {
 
 	// Footer
 	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748B")).
+		Foreground(color("#64748B")).
 		Italic(true)
 
 	lines = append(lines, "")

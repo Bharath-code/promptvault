@@ -1,21 +1,40 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+func init() {
+	if os.Getenv("NO_COLOR") != "" {
+		noColor = true
+	}
+}
+
+var noColor = false
+
+func color(hex string) lipgloss.Color {
+	if noColor {
+		return lipgloss.Color("")
+	}
+	return lipgloss.Color(hex)
+}
 
 // ── Color Palette ─────────────────────────────────────────────
 var (
-	colorPrimary  = lipgloss.Color("#7C3AED") // Vibrant purple
-	colorAccent   = lipgloss.Color("#06B6D4") // Cyan accent
-	colorSuccess  = lipgloss.Color("#10B981") // Emerald green
-	colorInfo     = lipgloss.Color("#3B82F6") // Blue
-	colorDanger   = lipgloss.Color("#EF4444") // Red
-	colorWarning  = lipgloss.Color("#F59E0B") // Amber
-	colorText     = lipgloss.Color("#E2E8F0") // Slate-200
-	colorMuted    = lipgloss.Color("#64748B") // Slate-500
-	colorBg       = lipgloss.Color("#0F172A") // Slate-900
-	colorBgAlt    = lipgloss.Color("#1E293B") // Slate-800
-	colorBgHover  = lipgloss.Color("#334155") // Slate-700
-	colorVerified = lipgloss.Color("#34D399") // Emerald-400
+	colorPrimary  = color("#7C3AED") // Vibrant purple
+	colorAccent   = color("#06B6D4") // Cyan accent
+	colorSuccess  = color("#10B981") // Emerald green
+	colorInfo     = color("#3B82F6") // Blue
+	colorDanger   = color("#EF4444") // Red
+	colorWarning  = color("#F59E0B") // Amber
+	colorText     = color("#E2E8F0") // Slate-200
+	colorMuted    = color("#64748B") // Slate-500
+	colorBg       = color("#0F172A") // Slate-900
+	colorBgAlt    = color("#1E293B") // Slate-800
+	colorBgHover  = color("#334155") // Slate-700
+	colorVerified = color("#34D399") // Emerald-400
 )
 
 // ── Header ────────────────────────────────────────────────────
@@ -41,7 +60,7 @@ var helpStyle = lipgloss.NewStyle().
 // ── Tags / Stack / Metadata ───────────────────────────────────
 var tagStyle = lipgloss.NewStyle().
 	Foreground(colorAccent).
-	Background(lipgloss.Color("#164E63")).
+	Background(color("#164E63")).
 	Padding(0, 1).
 	Bold(true)
 

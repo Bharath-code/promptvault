@@ -30,29 +30,29 @@ type QuickAction struct {
 var (
 	actionPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder()).
-				BorderForeground(lipgloss.Color("#334155")).
+				BorderForeground(color("#334155")).
 				Padding(1, 1)
 
 	actionCategoryStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7C3AED")).
+				Foreground(color("#7C3AED")).
 				Bold(true).
 				PaddingBottom(1)
 
 	actionItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#94A3B8"))
+			Foreground(color("#94A3B8"))
 
 	actionSelectedStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#334155")).
-				Foreground(lipgloss.Color("#E2E8F0"))
+				Background(color("#334155")).
+				Foreground(color("#E2E8F0"))
 
 	actionKeyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#06B6D4")).
-			Background(lipgloss.Color("#164E63")).
+			Foreground(color("#06B6D4")).
+			Background(color("#164E63")).
 			Padding(0, 1).
 			Bold(true)
 
 	actionIconStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7C3AED"))
+			Foreground(color("#7C3AED"))
 )
 
 type QuickActionsPanel struct {
@@ -128,7 +128,7 @@ func (qap *QuickActionsPanel) Render() string {
 
 	header := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(color("#7C3AED")).
 		PaddingBottom(1).
 		Width(qap.width).
 		Render("⚡ Actions")
@@ -151,7 +151,7 @@ func (qap *QuickActionsPanel) Render() string {
 	}
 
 	footer := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748B")).
+		Foreground(color("#64748B")).
 		Italic(true).
 		Width(qap.width).
 		Render("↑/↓ navigate  •  Enter execute")
@@ -174,8 +174,8 @@ func (qap *QuickActionsPanel) renderAction(action QuickAction, selected bool) st
 
 	if selected {
 		return " " + icon + " " + key + " " + lipgloss.NewStyle().
-			Background(lipgloss.Color("#334155")).
-			Foreground(lipgloss.Color("#E2E8F0")).
+			Background(color("#334155")).
+			Foreground(color("#E2E8F0")).
 			Render(label)
 	}
 

@@ -7,32 +7,48 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var noColor = os.Getenv("NO_COLOR") != ""
+
+func c(hex string) lipgloss.Color {
+	if noColor {
+		return lipgloss.Color("")
+	}
+	return lipgloss.Color(hex)
+}
+
 type Color = lipgloss.Color
 
 var (
-	Primary    = lipgloss.Color("#7C3AED")
-	Accent     = lipgloss.Color("#06B6D4")
-	Success    = lipgloss.Color("#10B981")
-	Info       = lipgloss.Color("#3B82F6")
-	Danger     = lipgloss.Color("#EF4444")
-	Warning    = lipgloss.Color("#F59E0B")
-	Text       = lipgloss.Color("#E2E8F0")
-	Muted      = lipgloss.Color("#64748B")
-	Background = lipgloss.Color("#0F172A")
-	BgAlt      = lipgloss.Color("#1E293B")
-	BgHover    = lipgloss.Color("#334155")
-	Verified   = lipgloss.Color("#34D399")
+	Primary    = c("#7C3AED")
+	Accent     = c("#06B6D4")
+	Success    = c("#10B981")
+	Info       = c("#3B82F6")
+	Danger     = c("#EF4444")
+	Warning    = c("#F59E0B")
+	Text       = c("#E2E8F0")
+	Muted      = c("#64748B")
+	Background = c("#0F172A")
+	BgAlt      = c("#1E293B")
+	BgHover    = c("#334155")
+	Verified   = c("#34D399")
 )
 
 var (
-	SuccessCode = "\033[38;5;2m"
-	ErrorCode   = "\033[38;5;1m"
-	WarningCode = "\033[38;5;3m"
-	InfoCode    = "\033[38;5;6m"
-	PrimaryCode = "\033[38;5;129m"
-	MutedCode   = "\033[38;5;245m"
+	SuccessCode = ansiColor(2)
+	ErrorCode   = ansiColor(1)
+	WarningCode = ansiColor(3)
+	InfoCode    = ansiColor(6)
+	PrimaryCode = ansiColor(129)
+	MutedCode   = ansiColor(245)
 	ResetCode   = "\033[0m"
 )
+
+func ansiColor(code int) string {
+	if noColor {
+		return ""
+	}
+	return fmt.Sprintf("\033[38;5;%dm", code)
+}
 
 var TitleStyle = lipgloss.NewStyle().
 	Bold(true).
@@ -51,7 +67,7 @@ var ItemStyle = lipgloss.NewStyle().
 
 var TagStyle = lipgloss.NewStyle().
 	Foreground(Accent).
-	Background(lipgloss.Color("#164E63")).
+	Background(c("#164E63")).
 	Padding(0, 1).
 	Bold(true)
 
