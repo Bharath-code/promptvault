@@ -48,39 +48,52 @@ var (
 	iconSparkle = "⚡"
 )
 
-// DX: Verbose/Debug mode flags
+// DX: Verbose/Debug/Quiet mode flags
 var (
 	verbose bool
 	debug   bool
+	quiet   bool
 )
 
 // DX: Logging helpers for verbose mode
 func logInfo(format string, args ...interface{}) {
-	if verbose {
+	if verbose && !quiet {
 		fmt.Fprintf(os.Stderr, colorInfo+iconInfo+"  "+format+colorReset+"\n", args...)
 	}
 }
 
 func logDebug(format string, args ...interface{}) {
-	if debug {
+	if debug && !quiet {
 		timestamp := time.Now().Format("15:04:05.000")
 		fmt.Fprintf(os.Stderr, "\033[38;5;245m🔍 [%s] %s\033[0m\n", timestamp, fmt.Sprintf(format, args...))
 	}
 }
 
 func printSuccess(format string, args ...interface{}) {
+	if quiet {
+		return
+	}
 	fmt.Fprintf(os.Stderr, colorSuccess+iconSuccess+" "+format+colorReset+"\n", args...)
 }
 
 func printError(format string, args ...interface{}) {
+	if quiet {
+		return
+	}
 	fmt.Fprintf(os.Stderr, colorError+iconError+" "+format+colorReset+"\n", args...)
 }
 
 func printWarning(format string, args ...interface{}) {
+	if quiet {
+		return
+	}
 	fmt.Fprintf(os.Stderr, colorWarning+iconWarning+" "+format+colorReset+"\n", args...)
 }
 
 func printInfo(format string, args ...interface{}) {
+	if quiet {
+		return
+	}
 	fmt.Fprintf(os.Stderr, colorInfo+iconInfo+"  "+format+colorReset+"\n", args...)
 }
 
@@ -149,12 +162,12 @@ func wrapError(err error, message string) error {
 	if err == nil {
 		return nil
 	}
-
-	suggestion := suggestFix(err)
-	if suggestion != "" {
-		fmt.Fprint(os.Stderr, suggestion)
+	if !quiet {
+		suggestion := suggestFix(err)
+		if suggestion != "" {
+			fmt.Fprint(os.Stderr, suggestion)
+		}
 	}
-
 	return fmt.Errorf("%s: %w", message, err)
 }
 
@@ -245,6 +258,9 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 // Returns a done function that should be called when the operation is complete
 // Note: the returned function is idempotent and safe to call multiple times
 func showLoading(msg string) func() {
+	if quiet {
+		return func() {}
+	}
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	var once sync.Once
@@ -274,6 +290,33 @@ func showLoading(msg string) func() {
 	}
 }
 
+// progressBar displays an inline progress bar
+// Returns an update function that takes current and total
+func progressBar(msg string, total int) func(current, total int) {
+	if quiet || total <= 0 {
+		return func(current, total int) {}
+	}
+	width := 30
+	return func(current, total int) {
+		if total <= 0 {
+			return
+		}
+		if current < 0 {
+			current = 0
+		}
+		if current > total {
+			current = total
+		}
+		filled := width * current / total
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+		pct := 100 * current / total
+		fmt.Printf("\r%s [%s] %d%% (%d/%d)   ", msg, bar, pct, current, total)
+		if current == total {
+			fmt.Println()
+		}
+	}
+}
+
 // Root command
 var rootCmd = &cobra.Command{
 	Use:   "promptvault",
@@ -295,19 +338,53 @@ var searchHistoryListCmd *cobra.Command
 var searchHistoryClearCmd *cobra.Command
 
 func init() {
-	// DX: Add verbose and debug flags
+	// DX: Add verbose, debug, and quiet flags
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "Enable debug output")
+	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Suppress status messages (for scripting)")
 }
 
 // add command
 var addCmd = &cobra.Command{
 	Use:   "add [title]",
 	Short: "Add a new prompt",
-	Args:  cobra.MaximumNArgs(1),
+	Long: `Add a new prompt to the vault.
+
+Use -i/--interactive for guided creation, or provide flags directly.
+Content can be piped via stdin.
+
+Examples:
+  # Interactive mode
+  promptvault add -i
+
+  # With all flags
+  promptvault add "My Prompt" --content "..." --stack frontend/react --tags api,hooks
+
+  # Pipe content via stdin
+  cat prompt.txt | promptvault add "My Prompt" --stack backend/go
+`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		logDebug("Executing add command")
+
+		interactive, _ := cmd.Flags().GetBool("interactive")
+		if interactive {
+			prompt, err := interactiveCreate()
+			if err != nil {
+				if quiet {
+					return fmt.Errorf("interactive creation cancelled")
+				}
+				printError("%v", err)
+				return nil
+			}
+			if err := database.Add(ctx, prompt); err != nil {
+				return wrapError(err, "adding prompt")
+			}
+			printSuccess("Added prompt: %s", prompt.Title)
+			logInfo("ID: %s", prompt.ID)
+			return nil
+		}
 
 		title, _ := cmd.Flags().GetString("title")
 		content, _ := cmd.Flags().GetString("content")
@@ -383,7 +460,7 @@ var addCmd = &cobra.Command{
 		}
 
 		// DX: Preview before adding
-		if preview {
+		if preview && !quiet {
 			fmt.Println()
 			fmt.Println(colorPrimary + "┌" + strings.Repeat("─", 70) + "┐" + colorReset)
 			fmt.Println(colorPrimary + "│" + colorReset + centerText("📋 PREVIEW", 70) + colorPrimary + "│" + colorReset)
@@ -460,6 +537,7 @@ func init() {
 	addCmd.Flags().Bool("verified", false, "Mark as verified")
 	// DX: Preview flag
 	addCmd.Flags().Bool("preview", false, "Preview before adding")
+	addCmd.Flags().BoolP("interactive", "i", false, "Interactive mode (guided creation)")
 }
 
 // list command
@@ -776,12 +854,16 @@ Examples:
 					printError("Failed to create directory: %s", output)
 					return wrapError(err, "creating directory")
 				}
-				for _, f := range files {
+				total := len(files)
+				pb := progressBar("Writing files", total)
+				for i, f := range files {
+					pb(i+1, total)
 					filename := output + "/" + f.Filename
 					if err := os.WriteFile(filename, []byte(f.Content), 0644); err != nil {
 						printWarning("Failed to write: %s", filename)
 					}
 				}
+				pb(total, total)
 				printSuccess("Exported %d prompts to %s/", len(files), output)
 			} else {
 				// Print manifest to stdout
@@ -870,20 +952,18 @@ If your vault already contains prompts, use --force to add seeds anyway.
 			return nil
 		}
 
-		// Show loading indicator
-		stopLoading := showLoading("Initializing vault with curated prompts...")
-
 		seeds := model.SeedPrompts()
 		added := 0
-		for _, p := range seeds {
+		pb := progressBar("Adding prompts", len(seeds))
+		for i, p := range seeds {
+			pb(i+1, len(seeds))
 			if err := database.Add(ctx, p); err != nil {
-				stopLoading()
 				printWarning("Skipping '%s': %v", p.Title, err)
 				continue
 			}
 			added++
 		}
-		stopLoading()
+		pb(len(seeds), len(seeds))
 
 		printSuccess("Initialized PromptVault with %d curated prompts!", added)
 		fmt.Println()
@@ -961,11 +1041,14 @@ Examples:
 			return nil
 		}
 
-		printInfo("Importing %d prompts...", result.Imported)
+		totalPrompts := len(result.Prompts)
+		printInfo("Importing %d prompts...", totalPrompts)
 
 		added := 0
 		skipped := 0
-		for _, p := range result.Prompts {
+		pb := progressBar("Importing", totalPrompts)
+		for i, p := range result.Prompts {
+			pb(i+1, totalPrompts)
 			p.ID = "" // Force new ID generation
 			if err := database.Add(ctx, p); err != nil {
 				logDebug("Skipping '%s': %v", p.Title, err)
@@ -974,6 +1057,7 @@ Examples:
 			}
 			added++
 		}
+		pb(totalPrompts, totalPrompts)
 
 		printSuccess("Imported %d prompts from %s", added, filename)
 		if skipped > 0 {
@@ -993,6 +1077,18 @@ var statsCmd = &cobra.Command{
 		total, stacks, err := database.Stats(ctx)
 		if err != nil {
 			return err
+		}
+
+		jsonOutput, _ := cmd.Flags().GetBool("json")
+		if jsonOutput {
+			data := map[string]interface{}{
+				"total_prompts": total,
+				"unique_stacks": stacks,
+				"database_path": database.Path(),
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(data)
 		}
 
 		fmt.Println()
@@ -1345,6 +1441,9 @@ func init() {
 
 	// init flags
 	initCmd.Flags().Bool("force", false, "Add seed prompts even if vault is not empty")
+
+	// stats flags
+	statsCmd.Flags().Bool("json", false, "Output as JSON")
 
 	// sync flags
 	syncPushCmd.Flags().String("token", "", "GitHub Personal Access Token (or set PROMPTVAULT_GITHUB_TOKEN)")

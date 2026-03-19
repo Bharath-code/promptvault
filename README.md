@@ -53,7 +53,17 @@ PromptVault fixes this. It's a CLI + TUI that keeps every prompt you've ever wri
 - **🔍 Decay Detection** — Audit prompts for issues with `promptvault audit`
 - **⏱️ Auto-Export Watch** — Watch mode for continuous export with `promptvault watch`
 
-### 🎨 v1.3: Enhanced TUI Experience (NEW!)
+### 🎨 v1.4: World-Class Tooling (NEW!)
+
+- **🔇 `NO_COLOR` Support** — Plain text output when `$NO_COLOR` is set (respects terminal color conventions)
+- **🤫 `-q`/`--quiet` Flag** — Suppress status messages for scripting; all output except stdout data silenced
+- **🎯 Interactive Add Mode** — `promptvault add -i` for guided, multi-line prompt creation
+- **📊 Progress Bars** — Visual progress for bulk operations (`init`, `import`, `export --format bulk`)
+- **🔢 Command Palette** — Press `:` for fuzzy-searchable command palette with scored matching (name, shortcut, description), `Tab` to cycle results
+- **↩️ Undo Support** — Press `u` to undo last add/edit/delete; vim `:u` and `:undo` also work; up to 50 actions remembered per session
+- **📈 `stats --json`** — Machine-readable stats output for dashboards
+
+### 🎨 v1.3: Enhanced TUI Experience
 
 - **🔍 Fuzzy Search** — Type anything, get relevant results with match scores
 - **❓ Quick Action Menu** — Press `?` for instant keybinding reference
@@ -103,6 +113,9 @@ promptvault add "Fix React useEffect deps" \
   --stack frontend/react/hooks \
   --models "claude-sonnet,gpt-4o" \
   --tags "debugging,hooks"
+
+# Add with interactive guided mode
+promptvault add -i
 
 # Add with preview (see before committing)
 promptvault add "My Prompt" --content "Prompt content..." --preview
@@ -208,11 +221,13 @@ source ~/.bash_completion
 | `a` | Add new prompt |
 | `e` | Edit selected |
 | `d` | Delete selected |
+| `u` | Undo last action (add/edit/delete) |
 | `v` | Toggle full-screen preview |
 | `r` | Refresh list |
 | `R` | Toggle recent prompts |
 | `s` | Show statistics |
 | `x` | Batch process (when items selected) |
+| `:` | Open command palette |
 | `?` | Quick action menu |
 | `Esc` | Clear filter / go back |
 | `q` | Quit |
@@ -244,13 +259,16 @@ source ~/.bash_completion
 |------|-------------|
 | `-v, --verbose` | Enable verbose output |
 | `-d, --debug` | Enable debug output with timestamps |
+| `-q, --quiet` | Suppress status messages (for scripting) |
 | `-h, --help` | Show help for command |
 
 ### Command-Specific Flags
 | Command | Flag | Description |
 |---------|------|-------------|
 | `list`, `search` | `--json` | Output as JSON for scripting |
+| `add` | `-i, --interactive` | Interactive guided creation |
 | `add` | `--preview` | Preview before adding |
+| `stats` | `--json` | Output stats as JSON |
 | `export` | `--format` | Export format (skill.md, cursorrules, etc.) |
 | `export` | `--stack` | Filter by stack |
 | `completion` | — | Generate shell completion scripts |
@@ -325,7 +343,7 @@ Export your entire prompt library — or a stack subset — to any AI tool forma
 - [x] Enhanced TUI (fuzzy search, multi-select, stats, full-screen preview)
 - [x] Performance optimization (40x faster load)
 
-**Latest:** v1.3 - Enhanced TUI Experience (Fuzzy Search, Multi-Select, Stats, Full-Screen Preview, 40x Faster!)
+**Latest:** v1.4 - World-Class Tooling (NO_COLOR, Quiet Mode, Interactive Add, Progress Bars, Command Palette, Undo)
 
 Star the repo to stay updated ⭐
 

@@ -17,6 +17,7 @@ var vimActions = []VimAction{
 	{"e", []string{"e"}, vimRefresh},
 	{"help", []string{"h", "help"}, vimHelp},
 	{"set", []string{"set"}, vimSet},
+	{"undo", []string{"u"}, vimUndo},
 }
 
 func vimQuit(a *App, args []string) bool {
@@ -66,7 +67,6 @@ func vimSet(a *App, args []string) bool {
 
 	switch option {
 	case "nu", "number":
-		// Toggle line numbers
 		return false
 	case "hlsearch", "hls":
 		return false
@@ -83,6 +83,15 @@ func vimSet(a *App, args []string) bool {
 		a.showWarning("Unknown option: " + option)
 		return false
 	}
+}
+
+func vimUndo(a *App, args []string) bool {
+	if len(a.undoStack) == 0 {
+		a.showWarning("Nothing to undo")
+		return false
+	}
+	a.handleUndo()
+	return false
 }
 
 func parseVimCommand(input string) (string, []string) {

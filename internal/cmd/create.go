@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/Bharath-code/promptvault/internal/ai"
 	"github.com/Bharath-code/promptvault/internal/model"
+	"github.com/spf13/cobra"
 )
 
 // create command
@@ -76,13 +76,17 @@ func init() {
 
 // interactiveCreate runs standard interactive prompt creation
 func interactiveCreate() (*model.Prompt, error) {
-	fmt.Println()
-	fmt.Println("📝 Create New Prompt")
-	fmt.Println(strings.Repeat("─", 60))
-	fmt.Println()
+	if !quiet {
+		fmt.Println()
+		fmt.Println("📝 Create New Prompt")
+		fmt.Println(strings.Repeat("─", 60))
+		fmt.Println()
+	}
 
 	// Get title
-	fmt.Print("📝 Title: ")
+	if !quiet {
+		fmt.Print("📝 Title: ")
+	}
 	var title string
 	fmt.Scanln(&title)
 
@@ -91,9 +95,11 @@ func interactiveCreate() (*model.Prompt, error) {
 	}
 
 	// Get content
-	fmt.Println()
-	fmt.Println("📄 Content (type 'DONE' on a new line to finish):")
-	fmt.Println(strings.Repeat("─", 60))
+	if !quiet {
+		fmt.Println()
+		fmt.Println("📄 Content (type 'DONE' on a new line to finish):")
+		fmt.Println(strings.Repeat("─", 60))
+	}
 
 	var contentBuilder strings.Builder
 	scanner := newScanner()
@@ -117,18 +123,24 @@ func interactiveCreate() (*model.Prompt, error) {
 	}
 
 	// Get stack
-	fmt.Println()
-	fmt.Print("📚 Tech stack (e.g., frontend/react/hooks): ")
+	if !quiet {
+		fmt.Println()
+		fmt.Print("📚 Tech stack (e.g., frontend/react/hooks): ")
+	}
 	var stack string
 	fmt.Scanln(&stack)
 
 	// Get tags
-	fmt.Print("🏷️  Tags (comma-separated): ")
+	if !quiet {
+		fmt.Print("🏷️  Tags (comma-separated): ")
+	}
 	var tagsStr string
 	fmt.Scanln(&tagsStr)
 
 	// Get models
-	fmt.Print("🤖 Models (comma-separated): ")
+	if !quiet {
+		fmt.Print("🤖 Models (comma-separated): ")
+	}
 	var modelsStr string
 	fmt.Scanln(&modelsStr)
 

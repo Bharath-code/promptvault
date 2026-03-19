@@ -124,6 +124,7 @@ func (h *HelpOverlay) renderLeftColumn(width int) string {
 	lines = append(lines, h.kl("a", "Add new prompt"))
 	lines = append(lines, h.kl("e", "Edit selected"))
 	lines = append(lines, h.kl("d", "Delete selected"))
+	lines = append(lines, h.kl("u", "Undo last action"))
 	lines = append(lines, h.kl("v", "Toggle preview"))
 	lines = append(lines, h.kl("c", "Copy selected"))
 	lines = append(lines, h.kl("r", "Refresh list"))

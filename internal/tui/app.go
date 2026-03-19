@@ -56,6 +56,65 @@ type CommandPalette struct {
 	cursor   int
 }
 
+const maxUndoStack = 50
+
+type undoActionType int
+
+const (
+	undoAdd undoActionType = iota
+	undoDelete
+	undoEdit
+)
+
+type UndoAction struct {
+	Type         undoActionType
+	Prompt       *model.Prompt
+	PrevTitle    string
+	PrevContent  string
+	PrevTags     []string
+	PrevStack    string
+	PrevModels   []string
+	PrevVerified bool
+}
+
+const undoCopyMaxLen = 10000
+
+func copyPromptForUndo(p *model.Prompt) *model.Prompt {
+	if p == nil {
+		return nil
+	}
+	content := p.Content
+	if len(content) > undoCopyMaxLen {
+		content = content[:undoCopyMaxLen]
+	}
+	tags := make([]string, len(p.Tags))
+	copy(tags, p.Tags)
+	models := make([]string, len(p.Models))
+	copy(models, p.Models)
+	return &model.Prompt{
+		ID:         p.ID,
+		Title:      p.Title,
+		Content:    content,
+		Tags:       tags,
+		Stack:      p.Stack,
+		Models:     models,
+		Verified:   p.Verified,
+		UsageCount: p.UsageCount,
+		CreatedAt:  p.CreatedAt,
+		UpdatedAt:  p.UpdatedAt,
+		LastUsedAt: p.LastUsedAt,
+	}
+}
+
+func copyStrings(s []string) []string {
+	if s == nil {
+		return nil
+	}
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
+}
+
 // App is the root Bubble Tea model
 type App struct {
 	db        *db.DB
@@ -105,6 +164,9 @@ type App struct {
 
 	// Command palette
 	commandPalette *CommandPalette
+
+	// Undo stack
+	undoStack []UndoAction
 
 	// Onboarding tour
 	showOnboarding bool
@@ -207,7 +269,7 @@ func NewCommandPalette() *CommandPalette {
 	}
 }
 
-// filterCommands filters commands by search query
+// filterCommands filters commands by search query (fuzzy match on name, description, and shortcut)
 func (cp *CommandPalette) filterCommands(query string) {
 	if query == "" {
 		cp.filtered = cp.commands
@@ -215,14 +277,137 @@ func (cp *CommandPalette) filterCommands(query string) {
 	}
 
 	query = strings.ToLower(query)
-	var filtered []Command
+	var scored []struct {
+		cmd   Command
+		score int
+	}
 	for _, cmd := range cp.commands {
-		if strings.Contains(strings.ToLower(cmd.Name), query) ||
-			strings.Contains(strings.ToLower(cmd.Description), query) {
-			filtered = append(filtered, cmd)
+		name := strings.ToLower(cmd.Name)
+		desc := strings.ToLower(cmd.Description)
+		shortcut := strings.ToLower(cmd.Shortcut)
+
+		score := 0
+		if name == query {
+			score = 100
+		} else if strings.HasPrefix(name, query) {
+			score = 80
+		} else if strings.Contains(name, query) {
+			score = 60
+		} else if shortcut == query {
+			score = 90
+		} else if strings.Contains(shortcut, query) {
+			score = 40
+		} else if strings.Contains(desc, query) {
+			score = 20
+		}
+
+		if score > 0 {
+			scored = append(scored, struct {
+				cmd   Command
+				score int
+			}{cmd, score})
 		}
 	}
-	cp.filtered = filtered
+
+	// Sort by score descending
+	for i := 0; i < len(scored)-1; i++ {
+		for j := i + 1; j < len(scored); j++ {
+			if scored[j].score > scored[i].score {
+				scored[i], scored[j] = scored[j], scored[i]
+			}
+		}
+	}
+
+	cp.filtered = make([]Command, len(scored))
+	for i, s := range scored {
+		cp.filtered[i] = s.cmd
+	}
+}
+
+// openCommandPalette opens the command palette with wired-up command actions
+func (a *App) openCommandPalette() {
+	a.state = stateCommandPalette
+	a.commandPalette = &CommandPalette{
+		search: func() textinput.Model {
+			m := textinput.New()
+			m.Placeholder = "Type a command..."
+			m.CharLimit = 50
+			return m
+		}(),
+		commands: []Command{},
+		filtered: []Command{},
+		cursor:   0,
+	}
+
+	cmds := []Command{
+		{"Add Prompt", "Create a new prompt", "a", func(a *App) (tea.Model, tea.Cmd) {
+			a.state = stateAdd
+			a.form = NewForm(nil)
+			return a, nil
+		}},
+		{"Edit Prompt", "Edit the selected prompt", "e", func(a *App) (tea.Model, tea.Cmd) {
+			if p := a.selectedPrompt(); p != nil {
+				a.state = stateEdit
+				a.form = NewForm(p)
+			}
+			return a, nil
+		}},
+		{"Delete Prompt", "Delete the selected prompt", "d", func(a *App) (tea.Model, tea.Cmd) {
+			if a.selectedPrompt() != nil {
+				a.state = stateDeleteConfirm
+			}
+			return a, nil
+		}},
+		{"Undo", "Undo last add/edit/delete", "u", func(a *App) (tea.Model, tea.Cmd) {
+			return a.handleUndo()
+		}},
+		{"Search", "Search prompts by text", "/", func(a *App) (tea.Model, tea.Cmd) {
+			a.state = stateSearch
+			a.search.Focus()
+			return a, nil
+		}},
+		{"Toggle Preview", "View selected prompt full-screen", "v", func(a *App) (tea.Model, tea.Cmd) {
+			if a.selectedPrompt() != nil {
+				a.state = stateDetail
+			}
+			return a, nil
+		}},
+		{"Refresh", "Reload prompts from database", "r", func(a *App) (tea.Model, tea.Cmd) {
+			a.loading = true
+			return a, a.loadPrompts()
+		}},
+		{"Toggle Recent", "Show/hide recently used prompts", "R", func(a *App) (tea.Model, tea.Cmd) {
+			a.showRecent = !a.showRecent
+			return a, nil
+		}},
+		{"Statistics", "View usage statistics", "s", func(a *App) (tea.Model, tea.Cmd) {
+			a.state = stateStats
+			return a, nil
+		}},
+		{"Theme Preview", "Browse and preview color themes", "g", func(a *App) (tea.Model, tea.Cmd) {
+			a.openThemePreview()
+			return a, nil
+		}},
+		{"Stack Tree", "Browse prompts by stack hierarchy", "t", func(a *App) (tea.Model, tea.Cmd) {
+			a.openStackTree()
+			return a, nil
+		}},
+		{"Quick Actions", "Jump to common actions", "o", func(a *App) (tea.Model, tea.Cmd) {
+			a.showQuickActions = true
+			return a, nil
+		}},
+		{"Help", "Show all keyboard shortcuts", "?", func(a *App) (tea.Model, tea.Cmd) {
+			a.state = stateHelpMenu
+			return a, nil
+		}},
+		{"Quit", "Exit PromptVault", "q", func(a *App) (tea.Model, tea.Cmd) {
+			return a, tea.Quit
+		}},
+	}
+
+	a.commandPalette.commands = cmds
+	a.commandPalette.filtered = cmds
+	a.commandPalette.search.Focus()
 }
 
 // loadPrompts fetches prompts from the db
@@ -359,8 +544,8 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleVimKey(msg)
 	}
 
-	// Handle states that close on any key press
-	if a.state == stateHelpMenu || a.state == stateStats || a.state == stateCommandPalette {
+	// Handle states that close on Esc
+	if a.state == stateHelpMenu || a.state == stateStats {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return a, tea.Quit
@@ -368,6 +553,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.state = stateList
 			return a, nil
 		}
+	}
+
+	// Command palette handling
+	if a.state == stateCommandPalette {
+		return a.handleCommandPaletteKey(msg)
 	}
 
 	// Onboarding tour keyboard handling
@@ -634,6 +824,9 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.showRecent = !a.showRecent
 		return a, nil
 
+	case "u":
+		return a.handleUndo()
+
 	case "s":
 		if a.state == stateStats {
 			a.state = stateList
@@ -647,9 +840,7 @@ func (a *App) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case ":":
-		a.state = stateCommandPalette
-		a.commandPalette = NewCommandPalette()
-		a.commandPalette.search.Focus()
+		a.openCommandPalette()
 		return a, textinput.Blink
 
 	case "t":
@@ -793,6 +984,10 @@ func (a *App) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.state == stateAdd {
 			err = a.db.Add(ctx, p)
 			if err == nil {
+				a.undoStack = append(a.undoStack, UndoAction{Type: undoAdd, Prompt: copyPromptForUndo(p)})
+				if len(a.undoStack) > maxUndoStack {
+					a.undoStack = a.undoStack[len(a.undoStack)-maxUndoStack:]
+				}
 				a.showSuccess("Prompt added!")
 			}
 		} else {
@@ -800,8 +995,24 @@ func (a *App) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if author == "" {
 				author = "anonymous"
 			}
+			prev := copyPromptForUndo(a.selectedPrompt())
 			err = a.db.Update(ctx, p, "Edited in TUI", author)
 			if err == nil {
+				if prev != nil {
+					a.undoStack = append(a.undoStack, UndoAction{
+						Type:         undoEdit,
+						Prompt:       prev,
+						PrevTitle:    prev.Title,
+						PrevContent:  prev.Content,
+						PrevTags:     copyStrings(prev.Tags),
+						PrevStack:    prev.Stack,
+						PrevModels:   copyStrings(prev.Models),
+						PrevVerified: prev.Verified,
+					})
+					if len(a.undoStack) > maxUndoStack {
+						a.undoStack = a.undoStack[len(a.undoStack)-maxUndoStack:]
+					}
+				}
 				a.showSuccess("Prompt updated!")
 			}
 		}
@@ -855,12 +1066,125 @@ func (a *App) handleVarFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
+func (a *App) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	cp := a.commandPalette
+	if cp == nil {
+		a.state = stateList
+		return a, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		a.state = stateList
+		a.commandPalette = nil
+		return a, nil
+
+	case "enter":
+		if len(cp.filtered) > 0 && cp.cursor < len(cp.filtered) {
+			selected := cp.filtered[cp.cursor]
+			a.state = stateList
+			a.commandPalette = nil
+			if selected.Action != nil {
+				return selected.Action(a)
+			}
+		}
+		a.state = stateList
+		a.commandPalette = nil
+		return a, nil
+
+	default:
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			var cmd tea.Cmd
+			cp.search, cmd = cp.search.Update(msg)
+			cp.filterCommands(cp.search.Value())
+			cp.cursor = 0
+			return a, cmd
+		}
+		return a, nil
+	}
+}
+
+func (a *App) handleUndo() (tea.Model, tea.Cmd) {
+	if len(a.undoStack) == 0 {
+		a.showWarning("Nothing to undo")
+		return a, nil
+	}
+
+	ctx := context.Background()
+	action := a.undoStack[len(a.undoStack)-1]
+	a.undoStack = a.undoStack[:len(a.undoStack)-1]
+
+	switch action.Type {
+	case undoAdd:
+		if action.Prompt != nil {
+			if err := a.db.Delete(ctx, action.Prompt.ID); err == nil {
+				a.showSuccess("Undo: deleted added prompt")
+			} else {
+				a.showError("Undo failed: " + err.Error())
+				a.undoStack = append(a.undoStack, action)
+			}
+		}
+
+	case undoDelete:
+		if action.Prompt != nil {
+			restored := &model.Prompt{
+				Title:      action.Prompt.Title,
+				Content:    action.Prompt.Content,
+				Tags:       copyStrings(action.Prompt.Tags),
+				Stack:      action.Prompt.Stack,
+				Models:     copyStrings(action.Prompt.Models),
+				Verified:   action.Prompt.Verified,
+				UsageCount: action.Prompt.UsageCount,
+			}
+			if err := a.db.Add(ctx, restored); err == nil {
+				a.showSuccess("Undo: restored deleted prompt")
+			} else {
+				a.showError("Undo failed: " + err.Error())
+				a.undoStack = append(a.undoStack, action)
+			}
+		}
+
+	case undoEdit:
+		if action.Prompt != nil {
+			restored := &model.Prompt{
+				ID:         action.Prompt.ID,
+				Title:      action.PrevTitle,
+				Content:    action.PrevContent,
+				Tags:       copyStrings(action.PrevTags),
+				Stack:      action.PrevStack,
+				Models:     copyStrings(action.PrevModels),
+				Verified:   action.PrevVerified,
+				UsageCount: action.Prompt.UsageCount,
+				CreatedAt:  action.Prompt.CreatedAt,
+			}
+			author := os.Getenv("USER")
+			if author == "" {
+				author = "anonymous"
+			}
+			if err := a.db.Update(ctx, restored, "Undo edit", author); err == nil {
+				a.showSuccess("Undo: reverted to previous version")
+			} else {
+				a.showError("Undo failed: " + err.Error())
+				a.undoStack = append(a.undoStack, action)
+			}
+		}
+	}
+
+	a.loading = true
+	return a, tea.Batch(a.loadPrompts(), tick())
+}
+
 func (a *App) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		ctx := context.Background()
 		if p := a.selectedPrompt(); p != nil {
+			backup := copyPromptForUndo(p)
 			if err := a.db.Delete(ctx, p.ID); err == nil {
+				a.undoStack = append(a.undoStack, UndoAction{Type: undoDelete, Prompt: backup})
+				if len(a.undoStack) > maxUndoStack {
+					a.undoStack = a.undoStack[len(a.undoStack)-maxUndoStack:]
+				}
 				a.showSuccess("Prompt deleted")
 				if a.cursor > 0 {
 					a.cursor--
@@ -897,6 +1221,9 @@ func (a *App) handleVimNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return a, tea.Quit
+
+	case "u":
+		return a.handleUndo()
 
 	case "i":
 		a.vimMode.EnterInsert()
@@ -1793,7 +2120,11 @@ func (a *App) renderStatusBar() string {
 		left = statusBarStyle.Render("PromptVault")
 	}
 
-	keys := statusBarMutedStyle.Render("a add  •  e edit  •  t stacks  •  / search  •  ? help  •  q quit")
+	undoHint := ""
+	if len(a.undoStack) > 0 {
+		undoHint = "  •  u undo"
+	}
+	keys := statusBarMutedStyle.Render("a add  •  e edit  •  d del  •  / search  •  ? help  •  q quit" + undoHint)
 
 	gap := lipgloss.NewStyle().
 		Background(colorBgAlt).
@@ -2076,40 +2407,61 @@ func (a *App) renderCommandPalette() string {
 	}
 
 	paletteWidth := 60
-	paletteHeight := 15
+	paletteHeight := 12
+	cp := a.commandPalette
 
 	var items []string
 	items = append(items, panelHeaderStyle.Render(" Command Palette"))
 
-	searchView := a.commandPalette.search.View()
+	searchView := cp.search.View()
 	items = append(items, searchView)
 	items = append(items, "")
 
-	maxItems := paletteHeight - 6
-	for i := 0; i < maxItems && i < len(a.commandPalette.filtered); i++ {
-		cmd := a.commandPalette.filtered[i]
-		shortcut := tagStyle.Render(cmd.Shortcut)
-		if i == a.commandPalette.cursor {
-			item := lipgloss.JoinHorizontal(lipgloss.Center,
-				selectedItemStyle.Render("> "),
-				lipgloss.NewStyle().Foreground(colorText).Render(cmd.Name),
-				lipgloss.NewStyle().Width(paletteWidth-25).Render(""),
-				shortcut,
-			)
-			items = append(items, item)
-		} else {
-			item := lipgloss.JoinHorizontal(lipgloss.Center,
-				lipgloss.NewStyle().Width(2).Render(" "),
-				lipgloss.NewStyle().Foreground(colorMuted).Render(cmd.Name),
-				lipgloss.NewStyle().Width(paletteWidth-25).Render(""),
-				lipgloss.NewStyle().Foreground(colorMuted).Render(cmd.Shortcut),
-			)
-			items = append(items, item)
+	if len(cp.filtered) == 0 {
+		items = append(items, lipgloss.NewStyle().
+			Foreground(colorMuted).
+			Width(paletteWidth).
+			Align(lipgloss.Center).
+			Render("No matching commands"))
+	} else {
+		maxItems := paletteHeight - 6
+		for i := 0; i < maxItems && i < len(cp.filtered); i++ {
+			cmd := cp.filtered[i]
+			shortcut := tagStyle.Render(cmd.Shortcut)
+			descLen := paletteWidth - 18 - len(cmd.Name)
+			descStr := ""
+			if descLen > 0 && len(cmd.Description) > 0 {
+				if len(cmd.Description) > descLen {
+					descStr = cmd.Description[:descLen-3] + "..."
+				} else {
+					descStr = cmd.Description
+				}
+			}
+			nameWidth := paletteWidth - 18 - len(shortcut) - len(descStr)
+			if i == cp.cursor {
+				item := lipgloss.JoinHorizontal(lipgloss.Center,
+					selectedItemStyle.Render("> "),
+					lipgloss.NewStyle().Foreground(colorText).Render(cmd.Name),
+					lipgloss.NewStyle().Width(max(0, nameWidth)).Render(""),
+					lipgloss.NewStyle().Foreground(colorMuted).Render(descStr),
+					shortcut,
+				)
+				items = append(items, item)
+			} else {
+				item := lipgloss.JoinHorizontal(lipgloss.Center,
+					lipgloss.NewStyle().Width(2).Render(" "),
+					lipgloss.NewStyle().Foreground(colorMuted).Render(cmd.Name),
+					lipgloss.NewStyle().Width(max(0, nameWidth)).Render(""),
+					lipgloss.NewStyle().Foreground(colorMuted).Render(descStr),
+					lipgloss.NewStyle().Foreground(colorMuted).Render(cmd.Shortcut),
+				)
+				items = append(items, item)
+			}
 		}
 	}
 
 	items = append(items, "")
-	items = append(items, helpStyle.Render("↑/↓ navigate  •  Enter execute  •  Esc close"))
+	items = append(items, helpStyle.Render("↑/↓ navigate  •  Tab cycle  •  Enter execute  •  Esc close"))
 
 	content := strings.Join(items, "\n")
 

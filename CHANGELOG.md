@@ -18,6 +18,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2026-03-19
+
+### 🔇 Added - World-Class Tooling
+
+#### `NO_COLOR` Support
+- Respects the `NO_COLOR` environment variable standard
+- All hex colors in TUI (`internal/tui/styles.go`, 8 files) return empty when set
+- CLI color codes (`internal/ui/colors.go`) also disabled
+- Works with ANSI codes for vim mode (ANSI numeric codes preserved)
+- Terminal-friendly for CI/CD, scripts, and accessibility needs
+
+#### Quiet Mode (`-q`/`--quiet`)
+- New persistent global flag: `promptvault -q <command>`
+- Suppresses all status messages (success, warning, error, info)
+- Spinner/loading indicators silenced
+- Still outputs actual data (prompt content, JSON, etc.) to stdout
+- All `printSuccess`, `printError`, `printWarning`, `printInfo`, `logInfo` helpers check `quiet` flag
+- Smart for scripting: `promptvault add -q "Title" --content "..."` stays silent
+- `stats` command gains `--json` flag for machine-readable output
+
+#### Interactive Add Mode (`add -i`)
+- New `-i`/`--interactive` flag on `add` command
+- Guided multi-line input with prompts for title, content (type `DONE` to finish), stack, tags, models
+- `quiet`-aware: all prompts suppressed when in quiet mode
+- Previously existed in `create` command; now accessible from `add` directly
+
+#### Progress Bars
+- Visual `████████░░ 75% (15/20)` progress bars for bulk operations
+- Affects: `promptvault init --force` (seed prompts), `promptvault import` (importing prompts), `promptvault export --format bulk` (writing files)
+- Shows percentage, current/total count
+- 30-char bar width, auto-clears on completion
+- Respects `--quiet`: returns no-op function when silenced
+
+### 🎨 Added - Enhanced TUI
+
+#### Command Palette (`:`)
+- Press `:` to open fuzzy-searchable command palette
+- **Fixed bug**: any key previously closed the palette instead of routing to textinput — now properly handled via `handleCommandPaletteKey`
+- **Scored fuzzy matching**: commands ranked by exact match (100), prefix match (80), contains (60), shortcut match (90/40), description match (20)
+- **`Tab` to cycle** results without arrow keys
+- **13 wired commands**: Add, Edit, Delete, **Undo**, Search, Toggle Preview, Refresh, Toggle Recent, Statistics, Theme Preview, Stack Tree, Quick Actions, Help, Quit
+- Shows description column alongside command name and shortcut
+
+#### Undo Support (`u`)
+- Press `u` in list mode or vim normal mode to undo the last action
+- Also available via `:undo` and `:u` in vim command mode
+- Added to command palette with description "Undo last add/edit/delete"
+- Stack-based with 50-action limit; oldest actions dropped when exceeded
+- **Undo add**: deletes the previously added prompt
+- **Undo delete**: restores the deleted prompt with all metadata (ID, content, tags, models, etc.)
+- **Undo edit**: reverts to the previous version via `db.Update`
+- Shows toast feedback: "Undo: deleted added prompt", "Undo: restored deleted prompt", "Undo: reverted to previous version"
+- If undo fails (e.g., DB error), action is pushed back onto the stack
+- `u` shown in status bar footer when undo stack is non-empty
+- `u` documented in `?` help overlay under Actions
+
+### 🐛 Fixed
+
+- `handleListKey`: any key pressed in command palette previously closed it instead of routing to textinput
+- `internal/tui/styles.go`: duplicate `colorBg` declarations
+- `internal/tui/app.go`: duplicate struct field declarations (`spinner`, `onboarding`, `stackTree`, etc.)
+- `internal/tui/help.go`: Esc key properly closes help overlay (was already wired)
+- Duplicate "Edit Prompt" entries in command palette initialization
+
+### 🔧 Technical
+
+- `internal/tui/styles.go`: Added `color(hex)` helper, `noColor` flag checked in `init()`, all 12 palette vars use `color()`
+- `internal/ui/colors.go`: Added `c(hex)` helper + `ansiColor()` for CLI; ANSI codes zeroed when `NO_COLOR` set
+- `internal/cmd/root.go`: Added `quiet bool` flag, `progressBar()` function, updated all print helpers
+- `internal/cmd/root.go`: Added `stats --json` flag with JSON output
+- `internal/cmd/root.go`: `showLoading` returns no-op when `quiet=true`
+- `internal/cmd/create.go`: `interactiveCreate()` checks `quiet` flag before printing prompts
+- `internal/tui/app.go`: Added `UndoAction` struct, `undoStack []UndoAction`, `maxUndoStack=50`, `handleUndo()` method
+- `internal/tui/app.go`: Added `handleCommandPaletteKey()` with proper textinput routing
+- `internal/tui/app.go`: Added `openCommandPalette()` with wired-up command actions
+- `internal/tui/app.go`: Updated `renderCommandPalette()` with empty-state handling, description column, improved layout
+- `internal/tui/app.go`: Updated `renderStatusBar()` to show `u undo` hint when stack is non-empty
+- `internal/tui/help.go`: Added `u` "Undo last action" to Actions section
+- `internal/tui/vimcommands.go`: Added `vimUndo` action wired to `handleUndo()`
+
+---
+
 ## [1.3.0] - 2026-03-06
 
 ### 🎨 Added - Enhanced TUI Experience
@@ -367,6 +449,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Codename | Key Features |
 |---------|------|----------|--------------|
+| [1.4.0] | 2026-03-19 | World-Class | NO_COLOR, quiet mode, interactive add, progress bars, command palette, undo |
 | [1.3.0] | 2026-03-06 | Enhanced TUI | Fuzzy search, multi-select, stats, full-screen, 40x faster |
 | [1.2.0] | 2026-03-05 | Professional | Testing, versioning, AI-assist, decay detection |
 | [1.1.0] | 2026-03-04 | DX | Smart errors, completion, JSON, verbose mode |
@@ -375,6 +458,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Migration Guide
+
+### From v1.3 to v1.4
+- No breaking changes
+- Database schema unchanged
+- All existing prompts compatible
+- New features available immediately
 
 ### From v1.2 to v1.3
 - No breaking changes
@@ -429,6 +518,6 @@ PromptVault is released under the [MIT License](LICENSE).
 
 ---
 
-**Last Updated:** March 6, 2026  
-**Current Version:** v1.3.0  
+**Last Updated:** March 19, 2026  
+**Current Version:** v1.4.0  
 **Status:** ✅ Stable
