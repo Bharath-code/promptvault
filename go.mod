@@ -12,7 +12,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/sergi/go-diff v1.4.0
 	github.com/spf13/cobra v1.8.1
-	golang.org/x/time v0.14.0
+	golang.org/x/time v0.15.0
 )
 
 require (
